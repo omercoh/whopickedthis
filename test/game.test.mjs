@@ -10,10 +10,26 @@ const YT = (id) => `https://www.youtube.com/watch?v=${id}`;
 
 const stubMeta = async () => ({ title: 'Test Song', artist: 'Test Artist', image: 'https://img.example/cover.jpg' });
 const stubSearch = async () => [];
+const ORIGIN = 'https://example.test';
 
-function client(store, fetchMeta = stubMeta, searchTracks = stubSearch) {
+function fakeSpotifyApi(overrides = {}) {
+  return {
+    buildAuthorizeUrl: (redirectUri, state) => `https://accounts.spotify.com/authorize?redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`,
+    exchangeCodeForTokens: async (code) => ({ accessToken: `access-${code}`, refreshToken: `refresh-${code}`, expiresIn: 3600 }),
+    refreshAccessToken: async (refreshToken) => ({ accessToken: `access-from-${refreshToken}`, expiresIn: 3600, refreshToken: null }),
+    getCurrentUser: async () => ({ id: 'user1', displayName: 'Test User' }),
+    createPlaylist: async () => ({ id: 'pl1', url: 'https://open.spotify.com/playlist/pl1' }),
+    addTracks: async () => {},
+    renamePlaylist: async () => {},
+    unfollowPlaylist: async () => {},
+    extractTrackId: (url) => String(url ?? '').match(/\/track\/([a-zA-Z0-9]+)/)?.[1] ?? null,
+    ...overrides,
+  };
+}
+
+function client(store, fetchMeta = stubMeta, searchTracks = stubSearch, spotifyApi, origin = ORIGIN) {
   const call = (method, path, body, adminCode, query) =>
-    handle({ method, path: '/api' + path, body, adminCode, adminSecret: SECRET, fetchMeta, searchTracks, query }, store);
+    handle({ method, path: '/api' + path, body, adminCode, adminSecret: SECRET, fetchMeta, searchTracks, spotifyApi, origin, query }, store);
   return {
     call,
     post: (p, b) => call('POST', p, b),
@@ -24,8 +40,24 @@ function client(store, fetchMeta = stubMeta, searchTracks = stubSearch) {
 
 async function seededGame() {
   const c = client(memoryStore());
+  // Register all 4 up front (host side, no songs yet) so that self-joining a
+  // song below doesn't auto-start the game as soon as MIN_PLAYERS is hit -
+  // only the last of the 4 to add a song should trigger that.
+  for (const name of ['Ana', 'Ben', 'Cy', 'Dee']) {
+    assert.equal((await c.admin('POST', '/entry', { name })).status, 200);
+  }
   for (const [name, url] of [['Ana', SP('a')], ['Ben', YT('b')], ['Cy', SP('c')], ['Dee', YT('d')]]) {
     assert.equal((await c.post('/join', { name, url })).status, 200);
+  }
+  return c;
+}
+
+// Same 4 players, but added by the host: unlike /join, this never auto-starts,
+// so the game stays in 'setup' for tests that need to exercise that phase.
+async function seededGameViaAdmin() {
+  const c = client(memoryStore());
+  for (const [name, url] of [['Ana', SP('a')], ['Ben', YT('b')], ['Cy', SP('c')], ['Dee', YT('d')]]) {
+    assert.equal((await c.admin('POST', '/entry', { name, url })).status, 200);
   }
   return c;
 }
@@ -140,10 +172,10 @@ test('host can add a player without a song link; they add it later, or the host 
     players: ['Ana', 'Ben', 'Cy'],
   });
 
-  // Cy adds their own song -> now the game can start
+  // Cy adds their own song, the last one needed -> the game auto-starts
   assert.equal((await c.post('/join', { name: 'Cy', url: SP('3') })).status, 200);
-  live = await c.admin('POST', '/status', { status: 'live' });
-  assert.equal(live.status, 200);
+  assert.equal((await c.get('/status')).data.status, 'live');
+  await c.admin('POST', '/status', { status: 'finished' });
   await c.admin('POST', '/status', { status: 'setup' });
 
   // alternatively, the host could have added the link for a player who never comes back
@@ -155,9 +187,47 @@ test('host can add a player without a song link; they add it later, or the host 
   assert.equal(live.status, 200);
 });
 
+test('auto-start: only a player finishing their own first song, via /join, starts the game', async () => {
+  const c = client(memoryStore());
+  await c.post('/join', { name: 'Ana', url: SP('1') });
+  await c.post('/join', { name: 'Ben', url: SP('2') });
+  assert.equal((await c.get('/status')).data.status, 'setup'); // still short of MIN_PLAYERS
+
+  // admin completing the last song must NOT auto-start (player page only)
+  assert.equal((await c.admin('POST', '/entry', { name: 'Cy' })).status, 200);
+  assert.equal((await c.admin('POST', '/entry', { oldName: 'Cy', name: 'Cy', url: SP('3') })).status, 200);
+  assert.equal((await c.get('/status')).data.status, 'setup');
+
+  // a player re-saving their OWN existing song is not "their first song" -> no auto-start
+  await c.post('/join', { name: 'Ana', url: SP('1-updated') });
+  assert.equal((await c.get('/status')).data.status, 'setup');
+
+  // add a 4th, songless player so the game isn't already complete
+  assert.equal((await c.admin('POST', '/entry', { name: 'Dee' })).status, 200);
+  await c.post('/join', { name: 'Ana', url: SP('1-updated-again') }); // still just an edit, not their first
+  assert.equal((await c.get('/status')).data.status, 'setup');
+
+  // Dee adding their first song is the last one needed -> auto-starts
+  assert.equal((await c.post('/join', { name: 'Dee', url: SP('4') })).status, 200);
+  assert.equal((await c.get('/status')).data.status, 'live');
+});
+
+test('auto-finish: the game ends the moment every player has submitted', async () => {
+  const c = await seededGame(); // already live: seeding the 4th song auto-starts it
+  assert.equal((await c.get('/status')).data.status, 'live');
+
+  await c.post('/submit', { name: 'Ana', guesses: await answers(c, 'Ana', 'right') });
+  assert.equal((await c.get('/status')).data.status, 'live');
+  await c.post('/submit', { name: 'Ben', guesses: await answers(c, 'Ben', 'right') });
+  assert.equal((await c.get('/status')).data.status, 'live');
+  await c.post('/submit', { name: 'Cy', guesses: await answers(c, 'Cy', 'right') });
+  assert.equal((await c.get('/status')).data.status, 'live');
+  await c.post('/submit', { name: 'Dee', guesses: await answers(c, 'Dee', 'right') }); // the last one
+  assert.equal((await c.get('/status')).data.status, 'finished');
+});
+
 test('players never see who picked what while the quiz is live', async () => {
-  const c = await seededGame();
-  await c.admin('POST', '/status', { status: 'live' });
+  const c = await seededGame(); // auto-started once Dee (the 4th) joined
   const r = await c.post('/login', { name: 'Ana' });
   assert.equal(r.data.status, 'live');
   assert.equal(r.data.songs.length, 4);
@@ -167,14 +237,13 @@ test('players never see who picked what while the quiz is live', async () => {
 });
 
 test('full flow: submit, scoring, results only after finish', async () => {
-  const c = await seededGame();
-  await c.admin('POST', '/status', { status: 'live' });
+  const c = await seededGame(); // auto-started once Dee (the 4th) joined
 
   const anaGuesses = await answers(c, 'Ana', 'right');
   assert.equal((await c.post('/submit', { name: 'Ana', guesses: anaGuesses })).status, 200);
   assert.equal((await c.post('/submit', { name: 'Ana', guesses: anaGuesses })).status, 409); // no double submit
   // while live: no score leaked
-  assert.deepEqual((await c.post('/login', { name: 'Ana' })).data, { status: 'live', name: 'Ana', submitted: true });
+  assert.deepEqual((await c.post('/login', { name: 'Ana' })).data, { status: 'live', name: 'Ana', submitted: true, playlist: null });
 
   const benGuesses = await answers(c, 'Ben', 'wrong');
   assert.equal((await c.post('/submit', { name: 'Ben', guesses: benGuesses })).status, 200);
@@ -206,15 +275,14 @@ test('full flow: submit, scoring, results only after finish', async () => {
   assert.deepEqual(rBen.leaderboard, expectedLeaderboard);
 
   const rCy = (await c.post('/login', { name: 'Cy' })).data;
-  assert.deepEqual(rCy, { status: 'finished', name: 'Cy', submitted: false, leaderboard: expectedLeaderboard });
+  assert.deepEqual(rCy, { status: 'finished', name: 'Cy', submitted: false, leaderboard: expectedLeaderboard, playlist: null });
 
   assert.equal((await c.post('/submit', { name: 'Cy', guesses: {} })).status, 409);
   assert.equal((await c.post('/join', { name: 'Late', url: SP('z') })).status, 409);
 });
 
 test('submit validation: incomplete, duplicate, self, unknown names', async () => {
-  const c = await seededGame();
-  await c.admin('POST', '/status', { status: 'live' });
+  const c = await seededGame(); // auto-started once Dee (the 4th) joined
   const me = (await c.post('/login', { name: 'Ana' })).data;
   const ids = me.songs.filter((s) => s.id !== me.mySongId).map((s) => s.id);
   const bad = async (guesses) => (await c.post('/submit', { name: 'Ana', guesses })).status;
@@ -226,7 +294,7 @@ test('submit validation: incomplete, duplicate, self, unknown names', async () =
 });
 
 test('host can edit/rename/delete in setup only, and reset a submission while live', async () => {
-  const c = await seededGame();
+  const c = await seededGameViaAdmin();
   assert.equal((await c.admin('POST', '/entry', { oldName: 'Dee', name: 'Deedee', url: SP('new') })).status, 200);
   assert.equal((await c.admin('POST', '/entry', { name: 'ana', url: SP('z') })).status, 409);
   assert.equal((await c.admin('POST', '/entry/delete', { name: 'Deedee' })).status, 200);
@@ -243,8 +311,7 @@ test('host can edit/rename/delete in setup only, and reset a submission while li
 });
 
 test('back to setup clears answers; new game wipes everything', async () => {
-  const c = await seededGame();
-  await c.admin('POST', '/status', { status: 'live' });
+  const c = await seededGame(); // auto-started once Dee (the 4th) joined
   await c.post('/submit', { name: 'Ana', guesses: await answers(c, 'Ana', 'right') });
   await c.admin('POST', '/status', { status: 'setup' });
   let o = (await c.admin('GET', '/overview')).data;
@@ -280,4 +347,170 @@ test('song search: skips short queries, returns results, and surfaces config/loo
   const c4 = client(memoryStore(), stubMeta, async () => { throw new Error('boom'); });
   const r4 = await c4.get('/search-songs', { q: 'abc' });
   assert.equal(r4.status, 502);
+});
+
+async function connectSpotify(store) {
+  await store.setJSON('spotify-auth', { refreshToken: 'seed-refresh', userId: 'user1', displayName: 'Test User', connectedAt: Date.now() });
+}
+
+test('game playlist: created on start when connected, skipping YouTube songs', async () => {
+  const calls = { createPlaylist: [], addTracks: [] };
+  const spotifyApi = fakeSpotifyApi({
+    createPlaylist: async (accessToken, userId, name) => {
+      calls.createPlaylist.push({ accessToken, userId, name });
+      return { id: 'pl1', url: 'https://open.spotify.com/playlist/pl1' };
+    },
+    addTracks: async (accessToken, playlistId, uris) => { calls.addTracks.push({ accessToken, playlistId, uris }); },
+  });
+  const store = memoryStore();
+  await connectSpotify(store);
+  const c = client(store, stubMeta, stubSearch, spotifyApi);
+  for (const [name, url] of [['Ana', SP('a')], ['Ben', YT('b')], ['Cy', SP('c')]]) {
+    assert.equal((await c.admin('POST', '/entry', { name, url })).status, 200);
+  }
+  assert.equal((await c.admin('POST', '/status', { status: 'live' })).data.status, 'live');
+
+  assert.equal(calls.createPlaylist.length, 1);
+  assert.equal(calls.createPlaylist[0].userId, 'user1');
+  assert.equal(calls.addTracks.length, 1);
+  // entries are ordered by a random songId, not insertion order, so compare as a set
+  assert.deepEqual([...calls.addTracks[0].uris].sort(), ['spotify:track:a', 'spotify:track:c']); // Ben's YouTube link is skipped
+
+  const login = (await c.post('/login', { name: 'Ana' })).data;
+  assert.equal(login.playlist.url, 'https://open.spotify.com/playlist/pl1');
+  assert.ok(login.playlist.name.length > 0);
+
+  const history = (await c.admin('GET', '/playlists')).data.playlists;
+  assert.equal(history.length, 1);
+  assert.equal(history[0].id, 'pl1');
+  assert.equal(history[0].trackCount, 2);
+});
+
+test('game playlist: skipped gracefully when not connected, all-YouTube, or Spotify errors - never blocks starting', async () => {
+  // not connected at all
+  let c = client(memoryStore());
+  for (const [name, url] of [['Ana', SP('a')], ['Ben', SP('b')], ['Cy', SP('c')]]) {
+    assert.equal((await c.admin('POST', '/entry', { name, url })).status, 200);
+  }
+  assert.equal((await c.admin('POST', '/status', { status: 'live' })).data.status, 'live');
+  assert.equal((await c.post('/login', { name: 'Ana' })).data.playlist, null);
+
+  // connected, but every song is YouTube -> nothing to add, so no playlist
+  let store = memoryStore();
+  await connectSpotify(store);
+  c = client(store, stubMeta, stubSearch, fakeSpotifyApi());
+  for (const [name, url] of [['Ana', YT('a')], ['Ben', YT('b')], ['Cy', YT('c')]]) {
+    assert.equal((await c.admin('POST', '/entry', { name, url })).status, 200);
+  }
+  assert.equal((await c.admin('POST', '/status', { status: 'live' })).data.status, 'live');
+  assert.equal((await c.post('/login', { name: 'Ana' })).data.playlist, null);
+
+  // connected, has Spotify songs, but the Spotify API call fails - game still starts fine
+  store = memoryStore();
+  await connectSpotify(store);
+  const failingApi = fakeSpotifyApi({ createPlaylist: async () => { throw new Error('spotify is down'); } });
+  c = client(store, stubMeta, stubSearch, failingApi);
+  for (const [name, url] of [['Ana', SP('a')], ['Ben', SP('b')], ['Cy', SP('c')]]) {
+    assert.equal((await c.admin('POST', '/entry', { name, url })).status, 200);
+  }
+  const live = await c.admin('POST', '/status', { status: 'live' });
+  assert.equal(live.status, 200);
+  assert.equal(live.data.status, 'live');
+  assert.equal((await c.post('/login', { name: 'Ana' })).data.playlist, null);
+});
+
+test('game playlist: the link survives finish/reopen, and is cleared (but kept in history) on reset', async () => {
+  const store = memoryStore();
+  await connectSpotify(store);
+  const c = client(store, stubMeta, stubSearch, fakeSpotifyApi());
+  for (const [name, url] of [['Ana', SP('a')], ['Ben', SP('b')], ['Cy', SP('c')]]) {
+    assert.equal((await c.admin('POST', '/entry', { name, url })).status, 200);
+  }
+  await c.admin('POST', '/status', { status: 'live' });
+  const playlistUrl = (await c.post('/login', { name: 'Ana' })).data.playlist.url;
+  assert.ok(playlistUrl);
+
+  await c.admin('POST', '/status', { status: 'finished' });
+  assert.equal((await c.post('/login', { name: 'Ana' })).data.playlist.url, playlistUrl);
+
+  await c.admin('POST', '/status', { status: 'live' }); // reopen
+  assert.equal((await c.post('/login', { name: 'Ana' })).data.playlist.url, playlistUrl);
+
+  await c.admin('POST', '/status', { status: 'setup' });
+  assert.equal((await c.admin('GET', '/overview')).data.status, 'setup');
+  assert.equal((await c.admin('GET', '/playlists')).data.playlists.length, 1); // stays in history
+});
+
+test('spotify connect flow: authorize redirect needs the admin code, callback checks single-use state', async () => {
+  const store = memoryStore();
+  const c = client(store, stubMeta, stubSearch, fakeSpotifyApi());
+
+  assert.equal((await c.get('/spotify/connect', { code: 'wrong' })).status, 401);
+
+  let r = await c.get('/spotify/connect', { code: SECRET });
+  assert.equal(r.status, 302);
+  assert.match(r.redirect, /^https:\/\/accounts\.spotify\.com\/authorize\?/);
+  assert.match(r.redirect, new RegExp(encodeURIComponent(`${ORIGIN}/api/spotify/callback`)));
+  const mismatchedState = 'not-the-real-state';
+
+  let cb = await c.get('/spotify/callback', { code: 'auth-code', state: mismatchedState });
+  assert.equal(cb.status, 302);
+  assert.match(cb.redirect, /spotify=error/);
+  assert.equal(await store.get('spotify-auth', { type: 'json' }), null);
+
+  r = await c.get('/spotify/connect', { code: SECRET }); // the failed callback consumed the old state
+  const state = new URL(r.redirect).searchParams.get('state');
+
+  cb = await c.get('/spotify/callback', { code: 'auth-code', state });
+  assert.equal(cb.status, 302);
+  assert.match(cb.redirect, /spotify=connected/);
+  assert.deepEqual((await c.admin('GET', '/spotify/status')).data, { connected: true, displayName: 'Test User' });
+
+  cb = await c.get('/spotify/callback', { code: 'auth-code', state }); // single-use: replay fails
+  assert.match(cb.redirect, /spotify=error/);
+
+  assert.equal((await c.admin('POST', '/spotify/disconnect')).status, 200);
+  assert.deepEqual((await c.admin('GET', '/spotify/status')).data, { connected: false, displayName: null });
+});
+
+test('admin playlist history: rename and delete update Spotify (best-effort) and our own record', async () => {
+  const store = memoryStore();
+  await connectSpotify(store);
+  await store.setJSON('playlists/pl1', { id: 'pl1', url: 'https://open.spotify.com/playlist/pl1', name: 'Old Name', createdAt: 1, trackCount: 2 });
+
+  const renamed = [];
+  const unfollowed = [];
+  const spotifyApi = fakeSpotifyApi({
+    renamePlaylist: async (token, id, name) => renamed.push({ token, id, name }),
+    unfollowPlaylist: async (token, id) => unfollowed.push({ token, id }),
+  });
+  const c = client(store, stubMeta, stubSearch, spotifyApi);
+
+  assert.equal((await c.admin('POST', '/playlists/rename', { id: 'pl1', name: 'New Name' })).status, 200);
+  assert.equal(renamed.length, 1);
+  assert.equal(renamed[0].name, 'New Name');
+  assert.equal((await c.admin('GET', '/playlists')).data.playlists[0].name, 'New Name');
+
+  assert.equal((await c.admin('POST', '/playlists/rename', { id: 'missing', name: 'X' })).status, 404);
+  assert.equal((await c.admin('POST', '/playlists/rename', { id: 'pl1', name: '' })).status, 400);
+
+  assert.equal((await c.admin('POST', '/playlists/delete', { id: 'pl1' })).status, 200);
+  assert.equal(unfollowed.length, 1);
+  assert.equal((await c.admin('GET', '/playlists')).data.playlists.length, 0);
+  assert.equal((await c.admin('POST', '/playlists/delete', { id: 'pl1' })).status, 200); // unknown id: harmless
+});
+
+test('admin playlist rename/delete still succeed locally even if the Spotify API call fails', async () => {
+  const store = memoryStore();
+  await connectSpotify(store);
+  await store.setJSON('playlists/pl1', { id: 'pl1', url: 'x', name: 'Old', createdAt: 1, trackCount: 1 });
+  const spotifyApi = fakeSpotifyApi({
+    renamePlaylist: async () => { throw new Error('down'); },
+    unfollowPlaylist: async () => { throw new Error('down'); },
+  });
+  const c = client(store, stubMeta, stubSearch, spotifyApi);
+  assert.equal((await c.admin('POST', '/playlists/rename', { id: 'pl1', name: 'New' })).status, 200);
+  assert.equal((await c.admin('GET', '/playlists')).data.playlists[0].name, 'New');
+  assert.equal((await c.admin('POST', '/playlists/delete', { id: 'pl1' })).status, 200);
+  assert.equal((await c.admin('GET', '/playlists')).data.playlists.length, 0);
 });

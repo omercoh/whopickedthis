@@ -4,8 +4,9 @@
 // this read-only catalog search needs an OAuth app access token.
 
 import { fetchWithTimeout } from './http.mjs';
+import { SpotifyNotConfiguredError } from './spotify-errors.mjs';
 
-export class SpotifyNotConfiguredError extends Error {}
+export { SpotifyNotConfiguredError };
 
 let cachedToken = null; // { token, expiresAt }
 

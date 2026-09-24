@@ -129,6 +129,11 @@ input:focus, select:focus { border-color: var(--cobalt); }
 .song-title-row { display: flex; align-items: center; gap: 10px; }
 .song-title { font: 800 1.05rem/1.3 var(--display); }
 .thumb { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex: none; border: 1px solid var(--line); background: var(--card); }
+.playlist-link {
+  display: inline-flex; align-items: center; font-weight: 700; text-decoration: none; color: var(--cobalt);
+  border: 2px solid var(--cobalt); border-radius: 999px; padding: 8px 18px; min-height: 40px; margin-top: 16px;
+}
+.playlist-link:hover { background: var(--cobalt); color: var(--on-cobalt); }
 
 .song-picker { position: relative; }
 .song-search-results {
@@ -236,6 +241,10 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     const thumb = s.image ? `<img class="thumb" src="${esc(safeUrl(s.image))}" alt="" loading="lazy" onerror="this.remove()">` : '';
     return `<div class="song-title-row">${thumb}<p class="song-title">${esc(songLabel(s))}</p></div>`;
   };
+
+  const playlistLinkHtml = (playlist) => playlist
+    ? `<a class="playlist-link" href="${esc(safeUrl(playlist.url))}" target="_blank" rel="noopener noreferrer">פלייליסט המשחק בספוטיפיי: ${esc(playlist.name)}</a>`
+    : '';
 
   /* ---------- song search (Spotify) ---------- */
   // A reusable "search by title" picker: typing searches Spotify and picking
@@ -540,6 +549,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
 
     setView(`
       ${topbar(d.name)}
+      ${playlistLinkHtml(d.playlist)}
       <h2>התאימו כל שיר</h2>
       <p class="muted" style="margin-top:8px">הקישו האזנה כדי לשמוע כל שיר, ואז בחרו מי בחר אותו. כל אדם מותאם לשיר אחד בלבד, והשיר שלכם כבר סומן.</p>
       <ol class="tracklist">${rows}</ol>
@@ -604,6 +614,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     setView(`
       ${topbar(d.name)}
       <div class="stack">
+        ${playlistLinkHtml(d.playlist)}
         <h2>התשובות ננעלו</h2>
         <p>יפה מאוד, ${esc(d.name)}. הניקוד והתשובות הנכונות יופיעו כאן ברגע שהמנחה יסיים את המשחק.</p>
         <p class="small muted">השאירו את הדף הזה פתוח. הוא מתעדכן לבד.</p>
@@ -633,6 +644,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
       setView(`
         ${topbar(d.name)}
         <div class="stack">
+          ${playlistLinkHtml(d.playlist)}
           <h2>המשחק הסתיים</h2>
           <p>לא נעלתם תשובות בסבב הזה, אז אין ניקוד להציג לכם. הנה איך כולם הסתדרו:</p>
           ${board}
@@ -655,6 +667,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     }).join('');
     setView(`
       ${topbar(d.name)}
+      ${playlistLinkHtml(d.playlist)}
       <h2>הניקוד שלכם</h2>
       <div class="score">${d.score}<small> / ${d.total}</small></div>
       <p>${esc(line)}</p>
@@ -665,7 +678,20 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
   }
 
   /* ---------- host ---------- */
-  const admin = { data: null, sig: '', tab: null, editing: null };
+  const admin = { data: null, sig: '', tab: null, editing: null, spotify: null, playlists: null, editingPlaylist: null };
+
+  async function loadPlaylistsTab() {
+    try {
+      const [status, list] = await Promise.all([
+        api('/admin/spotify/status', { admin: true }),
+        api('/admin/playlists', { admin: true }),
+      ]);
+      admin.spotify = status;
+      admin.playlists = list.playlists;
+    } catch (err) {
+      toast(err.message);
+    }
+  }
 
   function renderAdminLogin(message = '') {
     stopPoll();
@@ -721,6 +747,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     admin.sig = sig;
     admin.data = d;
     if (!admin.tab) admin.tab = d.status === 'setup' ? 'players' : 'picks';
+    if (admin.tab === 'playlists' && !admin.playlists) await loadPlaylistsTab();
     drawAdmin();
   }
 
@@ -765,8 +792,9 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
       <div class="tabs" role="tablist">
         <button class="tab" role="tab" data-action="tab" data-tab="players" aria-selected="${admin.tab === 'players'}">שחקנים ושירים</button>
         <button class="tab" role="tab" data-action="tab" data-tab="picks" aria-selected="${admin.tab === 'picks'}">התאמות</button>
+        <button class="tab" role="tab" data-action="tab" data-tab="playlists" aria-selected="${admin.tab === 'playlists'}">פלייליסטים</button>
       </div>
-      <div id="tabbody">${admin.tab === 'players' ? playersTab(d) : picksTab(d)}</div>
+      <div id="tabbody">${admin.tab === 'players' ? playersTab(d) : admin.tab === 'picks' ? picksTab(d) : playlistsTab()}</div>
       <details class="danger"><summary>אזור מסוכן</summary>
         <p class="small muted" style="margin-top:10px">מוחק את כל השחקנים, השירים והתשובות וחוזר לאיסוף שירים.</p>
         <button class="btn ghost danger sm" data-action="new-game">התחלת משחק חדש</button>
@@ -850,10 +878,59 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     </div>`;
   }
 
+  function playlistsTab() {
+    const sp = admin.spotify;
+    const connectPanel = !sp
+      ? '<p class="muted">טוען…</p>'
+      : sp.connected
+        ? `<div class="panel"><p>מחובר/ת לספוטיפיי כ־<strong>${esc(sp.displayName)}</strong>. משחקים חדשים יקבלו פלייליסט אוטומטית.</p>
+           <button class="btn ghost sm" data-action="spotify-disconnect">התנתקות</button></div>`
+        : `<div class="panel"><p class="muted">חברו חשבון ספוטיפיי כדי שכל משחק ייצור פלייליסט אוטומטית עם כל השירים.</p>
+           <a class="btn" href="/api/spotify/connect?code=${encodeURIComponent(adminCode)}">התחברות לספוטיפיי</a></div>`;
+
+    const list = admin.playlists || [];
+    const rows = list.map((p) => {
+      if (admin.editingPlaylist === p.id) {
+        return `<li class="entry"><form data-form="playlist-rename" data-id="${esc(p.id)}">
+          <div><label for="playlist-name">שם הפלייליסט</label><input id="playlist-name" name="name" maxlength="100" required value="${esc(p.name)}" dir="auto"></div>
+          <div class="actions"><button class="btn sm" type="submit">שמירה</button>
+          <button class="btn ghost sm" type="button" data-action="cancel-playlist-edit">ביטול</button></div></form></li>`;
+      }
+      const created = new Date(p.createdAt).toLocaleDateString('he-IL');
+      return `<li class="entry"><div><span class="who">${esc(p.name)}</span>
+        <span class="link">${p.trackCount} שירים · נוצר ב-${created}</span></div>
+        <div class="actions">
+          <a class="btn ghost sm" href="${esc(safeUrl(p.url))}" target="_blank" rel="noopener noreferrer">פתיחה</a>
+          <button class="btn ghost sm" type="button" data-action="copy-playlist" data-url="${esc(p.url)}">העתקת קישור</button>
+          <button class="btn ghost sm" type="button" data-action="rename-playlist" data-id="${esc(p.id)}">שינוי שם</button>
+          <button class="btn ghost danger sm" type="button" data-action="delete-playlist" data-id="${esc(p.id)}">מחיקה</button>
+        </div></li>`;
+    }).join('');
+
+    return `<div class="stack">${connectPanel}
+      <div>
+        <h3>היסטוריית פלייליסטים</h3>
+        <ul class="entry-list">${rows || '<li class="muted">עדיין אין פלייליסטים. הם ייווצרו אוטומטית כשמשחק מתחיל, אם החשבון מחובר.</li>'}</ul>
+      </div>
+    </div>`;
+  }
+
   async function mutate(fn, okMsg) {
     try {
       await fn();
       await refreshAdmin(true);
+      if (okMsg) toast(okMsg);
+    } catch (err) {
+      if (err.status === 401) { adminCode = ''; session.del('wpt-admin'); return renderAdminLogin(err.message); }
+      toast(err.message);
+    }
+  }
+
+  async function mutatePlaylists(fn, okMsg) {
+    try {
+      await fn();
+      await loadPlaylistsTab();
+      drawAdmin();
       if (okMsg) toast(okMsg);
     } catch (err) {
       if (err.status === 401) { adminCode = ''; session.del('wpt-admin'); return renderAdminLogin(err.message); }
@@ -867,7 +944,11 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     if (!el) return;
     const act = el.dataset.action;
     const name = el.dataset.name;
-    if (act === 'tab') { admin.tab = el.dataset.tab; admin.editing = null; drawAdmin(); }
+    if (act === 'tab') {
+      admin.tab = el.dataset.tab; admin.editing = null;
+      if (admin.tab === 'playlists' && !admin.playlists) await loadPlaylistsTab();
+      drawAdmin();
+    }
     else if (act === 'edit') { admin.editing = nk(name); drawAdmin(); const i = $('#edit-name'); if (i) i.focus(); }
     else if (act === 'cancel-edit') { admin.editing = null; drawAdmin(); }
     else if (act === 'signout') { adminCode = ''; session.del('wpt-admin'); stopPoll(); renderAdminLogin(); }
@@ -908,19 +989,60 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
         mutate(() => api('/admin/new-game', { method: 'POST', admin: true, body: {} }).then(() => { admin.tab = 'players'; admin.editing = null; }), 'משחק חדש מוכן');
       }
     }
+    else if (act === 'spotify-disconnect') {
+      if (await askConfirm({ title: 'להתנתק מספוטיפיי?', body: 'במשחקים הבאים לא ייווצר פלייליסט אוטומטית עד שתתחברו מחדש.', ok: 'התנתקות', danger: true })) {
+        mutatePlaylists(() => api('/admin/spotify/disconnect', { method: 'POST', admin: true }), 'התנתקתם מספוטיפיי');
+      }
+    }
+    else if (act === 'copy-playlist') {
+      const url = el.dataset.url;
+      try { await navigator.clipboard.writeText(url); toast('קישור הפלייליסט הועתק'); }
+      catch { window.prompt('העתיקו את קישור הפלייליסט:', url); }
+    }
+    else if (act === 'rename-playlist') { admin.editingPlaylist = el.dataset.id; drawAdmin(); const i = $('#playlist-name'); if (i) i.focus(); }
+    else if (act === 'cancel-playlist-edit') { admin.editingPlaylist = null; drawAdmin(); }
+    else if (act === 'delete-playlist') {
+      const id = el.dataset.id;
+      if (await askConfirm({ title: 'למחוק את הפלייליסט?', body: 'הוא יוסר מהיסטוריית הפלייליסטים, וגם מספוטיפיי אם עדיין מחוברים.', ok: 'מחיקה', danger: true })) {
+        mutatePlaylists(() => api('/admin/playlists/delete', { method: 'POST', admin: true, body: { id } }), 'הפלייליסט נמחק');
+      }
+    }
   }
 
   function adminSubmit(e) {
-    const form = e.target.closest('form[data-form="entry"]');
-    if (!form) return;
-    e.preventDefault();
-    const fd = new FormData(form);
-    const body = { name: fd.get('name'), url: fd.get('url') };
-    if (fd.get('oldName')) body.oldName = fd.get('oldName');
-    mutate(() => api('/admin/entry', { method: 'POST', admin: true, body }).then(() => { admin.editing = null; }), body.oldName ? 'נשמר' : 'השחקן נוסף');
+    const entryForm = e.target.closest('form[data-form="entry"]');
+    if (entryForm) {
+      e.preventDefault();
+      const fd = new FormData(entryForm);
+      const body = { name: fd.get('name'), url: fd.get('url') };
+      if (fd.get('oldName')) body.oldName = fd.get('oldName');
+      mutate(() => api('/admin/entry', { method: 'POST', admin: true, body }).then(() => { admin.editing = null; }), body.oldName ? 'נשמר' : 'השחקן נוסף');
+      return;
+    }
+    const playlistForm = e.target.closest('form[data-form="playlist-rename"]');
+    if (playlistForm) {
+      e.preventDefault();
+      const id = playlistForm.dataset.id;
+      const name = new FormData(playlistForm).get('name');
+      mutatePlaylists(
+        () => api('/admin/playlists/rename', { method: 'POST', admin: true, body: { id, name } }).then(() => { admin.editingPlaylist = null; }),
+        'שם הפלייליסט עודכן',
+      );
+    }
   }
 
   /* ---------- start ---------- */
+  function checkSpotifyCallback() {
+    const params = new URLSearchParams(location.search);
+    const result = params.get('spotify');
+    if (!result) return;
+    toast(result === 'connected' ? 'ספוטיפיי חובר בהצלחה' : 'החיבור לספוטיפיי נכשל. נסו שוב.');
+    if (location.hash === '#admin') admin.tab = 'playlists';
+    params.delete('spotify');
+    const qs = params.toString();
+    history.replaceState(null, '', location.pathname + (qs ? `?${qs}` : '') + location.hash);
+  }
+  checkSpotifyCallback();
   route();
 })();
 </script>
