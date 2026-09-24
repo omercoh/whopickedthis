@@ -7,7 +7,7 @@ const SECRET = 'hostcode';
 const SP = (id) => `https://open.spotify.com/track/${id}`;
 const YT = (id) => `https://www.youtube.com/watch?v=${id}`;
 
-const stubMeta = async () => ({ title: 'Test Song', artist: 'Test Artist' });
+const stubMeta = async () => ({ title: 'Test Song', artist: 'Test Artist', image: 'https://img.example/cover.jpg' });
 
 function client(store, fetchMeta = stubMeta) {
   const call = (method, path, body, adminCode) =>
@@ -56,12 +56,13 @@ test('join validates names and links', async () => {
 
 test('song metadata is fetched on join and reused when the link is unchanged', async () => {
   let calls = 0;
-  const fetchMeta = async () => { calls += 1; return { title: 'Song', artist: 'Artist' }; };
+  const fetchMeta = async () => { calls += 1; return { title: 'Song', artist: 'Artist', image: 'https://img.example/a.jpg' }; };
   const c = client(memoryStore(), fetchMeta);
   await c.post('/join', { name: 'Ana', url: SP('1') });
   assert.equal(calls, 1);
   let o = (await c.admin('GET', '/overview')).data;
   assert.deepEqual([o.entries[0].title, o.entries[0].artist], ['Song', 'Artist']);
+  assert.equal(o.entries[0].image, 'https://img.example/a.jpg');
 
   // same link again -> no re-fetch, metadata kept
   await c.post('/join', { name: 'Ana', url: SP('1') });
@@ -76,6 +77,18 @@ test('song metadata is fetched on join and reused when the link is unchanged', a
   assert.equal((await c2.post('/join', { name: 'Ben', url: SP('x') })).status, 200);
   o = (await c2.admin('GET', '/overview')).data;
   assert.deepEqual([o.entries[0].title, o.entries[0].artist], [null, null]);
+
+  // a failed lookup is retried on the next join/edit, even with the same link
+  let attempt = 0;
+  const flaky = async () => (++attempt === 1 ? null : { title: 'Song', artist: 'Artist' });
+  const c3 = client(memoryStore(), flaky);
+  await c3.post('/join', { name: 'Cy', url: SP('y') });
+  o = (await c3.admin('GET', '/overview')).data;
+  assert.deepEqual([o.entries[0].title, o.entries[0].artist], [null, null]);
+  await c3.post('/join', { name: 'Cy', url: SP('y') });
+  assert.equal(attempt, 2);
+  o = (await c3.admin('GET', '/overview')).data;
+  assert.deepEqual([o.entries[0].title, o.entries[0].artist], ['Song', 'Artist']);
 });
 
 test('names are unique case-insensitively; rejoining updates the song', async () => {
@@ -110,7 +123,7 @@ test('players never see who picked what while the quiz is live', async () => {
   assert.equal(r.data.status, 'live');
   assert.equal(r.data.songs.length, 4);
   assert.deepEqual(r.data.players, ['Ben', 'Cy', 'Dee']);
-  assert.deepEqual(Object.keys(r.data.songs[0]).sort(), ['artist', 'id', 'n', 'platform', 'title', 'url']);
+  assert.deepEqual(Object.keys(r.data.songs[0]).sort(), ['artist', 'id', 'image', 'n', 'platform', 'title', 'url']);
   assert.equal((await c.post('/login', { name: 'Zed' })).status, 404);
 });
 

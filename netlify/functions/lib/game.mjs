@@ -4,7 +4,7 @@
 //
 // Data layout:
 //   meta                -> { status: 'setup' | 'live' | 'finished' }
-//   entries/<nameKey>   -> { name, url, platform, title, artist, songId, createdAt }
+//   entries/<nameKey>   -> { name, url, platform, title, artist, image, songId, createdAt }
 //   guesses/<nameKey>   -> { name, guesses: { [songId]: playerName }, submittedAt }
 
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
@@ -78,6 +78,7 @@ async function loadEntries(store) {
 }
 
 const findEntry = (entries, name) => entries.find((e) => nameKey(e.name) === nameKey(name));
+const hasMeta = (e) => !!(e?.title || e?.artist);
 const publicSong = (e) => ({
   id: e.songId,
   n: e.n,
@@ -85,6 +86,7 @@ const publicSong = (e) => ({
   platform: e.platform,
   title: e.title ?? null,
   artist: e.artist ?? null,
+  image: e.image ?? null,
 });
 
 async function clearGuesses(store) {
@@ -168,13 +170,14 @@ async function join(store, body, fetchMeta) {
   const entries = await loadEntries(store);
   const existing = findEntry(entries, name);
   if (!existing && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'המשחק הזה מלא.');
-  const info = existing?.url === url ? existing : await fetchMeta(url, platform);
+  const info = existing?.url === url && hasMeta(existing) ? existing : await fetchMeta(url, platform);
   await store.setJSON(entryKey(existing?.name ?? name), {
     name: existing?.name ?? name,
     url,
     platform,
     title: info?.title ?? null,
     artist: info?.artist ?? null,
+    image: info?.image ?? null,
     songId: existing?.songId ?? randomBytes(4).toString('hex'),
     createdAt: existing?.createdAt ?? Date.now(),
   });
@@ -250,7 +253,7 @@ async function adminSaveEntry(store, body, fetchMeta) {
   if (!old && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'המשחק הזה מלא.');
 
   const base = old;
-  const info = base?.url === url ? base : await fetchMeta(url, platform);
+  const info = base?.url === url && hasMeta(base) ? base : await fetchMeta(url, platform);
   if (old && entryKey(old.name) !== entryKey(name)) await store.delete(entryKey(old.name));
   await store.setJSON(entryKey(name), {
     name,
@@ -258,6 +261,7 @@ async function adminSaveEntry(store, body, fetchMeta) {
     platform,
     title: info?.title ?? null,
     artist: info?.artist ?? null,
+    image: info?.image ?? null,
     songId: base?.songId ?? randomBytes(4).toString('hex'),
     createdAt: base?.createdAt ?? Date.now(),
   });

@@ -1,10 +1,12 @@
-// Best-effort artist/title lookup for a song link, so the app can show
-// "Artist - Song" instead of a bare track number. Any failure (network,
-// unexpected markup, private/removed track) just yields no metadata —
-// callers fall back to the numbered placeholder.
+// Best-effort artist/title/artwork lookup for a song link, so the app can
+// show "Artist - Song" and a thumbnail instead of a bare track number. Any
+// failure (network, unexpected markup, private/removed track) just yields
+// no metadata — callers fall back to the numbered placeholder.
 
 const FETCH_TIMEOUT_MS = 4000;
-const UA = 'Mozilla/5.0 (compatible; WhoPickedThisBot/1.0)';
+// A real browser UA: Spotify's track pages render Open Graph tags for link
+// unfurls, but can serve a stripped-down page to obvious bot user agents.
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
 async function fetchWithTimeout(url, opts) {
   const controller = new AbortController();
@@ -48,14 +50,35 @@ function spotifyArtistFromDescription(description) {
   return parts[1] || null;
 }
 
-async function fetchSpotifyMeta(url) {
+// Spotify's public oEmbed only ever returns the track name and artwork (no
+// artist field), but it's a stable documented JSON API, so it's the most
+// reliable source for those two. The track page's Open Graph tags are the
+// only place the artist shows up, but scraping HTML is inherently more
+// fragile, so that part is allowed to fail without losing what we already have.
+async function fetchSpotifyOembed(url) {
+  const res = await fetchWithTimeout(`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`, {
+    headers: { 'user-agent': UA },
+  });
+  if (!res.ok) { console.warn('spotify oembed failed', res.status, url); return null; }
+  const data = await res.json();
+  return { title: data?.title || null, image: data?.thumbnail_url || null };
+}
+
+async function fetchSpotifyPageTags(url) {
   const res = await fetchWithTimeout(url, { headers: { 'user-agent': UA, accept: 'text/html' } });
-  if (!res.ok) return null;
-  const html = await res.text();
-  const tags = metaTags(html);
-  const title = tags['og:title'];
+  if (!res.ok) { console.warn('spotify page fetch failed', res.status, url); return null; }
+  return metaTags(await res.text());
+}
+
+async function fetchSpotifyMeta(url) {
+  const [oembed, tags] = await Promise.all([
+    fetchSpotifyOembed(url).catch((err) => { console.warn('spotify oembed error', err?.message || err); return null; }),
+    fetchSpotifyPageTags(url).catch((err) => { console.warn('spotify page error', err?.message || err); return null; }),
+  ]);
+  const title = oembed?.title || tags?.['og:title'] || null;
   if (!title) return null;
-  return { title, artist: spotifyArtistFromDescription(tags['og:description']) };
+  const image = oembed?.image || tags?.['og:image'] || null;
+  return { title, artist: spotifyArtistFromDescription(tags?.['og:description']), image };
 }
 
 function splitYoutubeTitle(rawTitle, authorName) {
@@ -72,18 +95,18 @@ function splitYoutubeTitle(rawTitle, authorName) {
 async function fetchYoutubeMeta(url) {
   const api = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
   const res = await fetchWithTimeout(api, { headers: { 'user-agent': UA } });
-  if (!res.ok) return null;
+  if (!res.ok) { console.warn('youtube oembed failed', res.status, url); return null; }
   const data = await res.json();
   if (!data?.title) return null;
-  return splitYoutubeTitle(data.title, data.author_name);
+  return { ...splitYoutubeTitle(data.title, data.author_name), image: data.thumbnail_url || null };
 }
 
 export async function fetchSongMeta(url, platform) {
   try {
     if (platform === 'spotify') return await fetchSpotifyMeta(url);
     if (platform === 'youtube') return await fetchYoutubeMeta(url);
-  } catch {
-    // best-effort only
+  } catch (err) {
+    console.warn('song metadata lookup failed', platform, url, err?.message || err);
   }
   return null;
 }
