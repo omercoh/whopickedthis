@@ -3,20 +3,11 @@
 // failure (network, unexpected markup, private/removed track) just yields
 // no metadata — callers fall back to the numbered placeholder.
 
-const FETCH_TIMEOUT_MS = 4000;
+import { fetchWithTimeout } from './http.mjs';
+
 // A real browser UA: Spotify's track pages render Open Graph tags for link
 // unfurls, but can serve a stripped-down page to obvious bot user agents.
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
-
-async function fetchWithTimeout(url, opts) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...opts, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 const decodeEntities = (s) =>
   String(s ?? '')

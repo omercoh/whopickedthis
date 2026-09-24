@@ -10,6 +10,7 @@
 
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { fetchSongMeta } from './metadata.mjs';
+import { searchSpotifyTracks, SpotifyNotConfiguredError } from './spotify-search.mjs';
 
 export class HttpError extends Error {
   constructor(status, message) {
@@ -135,6 +136,28 @@ async function buildLeaderboard(store, entries) {
     });
 }
 
+// ---------- song search ----------
+
+const MIN_SEARCH_QUERY = 2;
+const MAX_SEARCH_QUERY = 100;
+
+async function searchSongs(query, searchTracks) {
+  const q = String(query ?? '').trim().slice(0, MAX_SEARCH_QUERY);
+  if (q.length < MIN_SEARCH_QUERY) return { results: [] };
+  try {
+    return { results: await searchTracks(q) };
+  } catch (err) {
+    if (err instanceof SpotifyNotConfiguredError) {
+      throw new HttpError(
+        500,
+        'חיפוש שירים לא הוגדר. הוסיפו SPOTIFY_CLIENT_ID ו-SPOTIFY_CLIENT_SECRET ב-Netlify תחת Site configuration → Environment variables, ואז פרסמו מחדש.',
+      );
+    }
+    console.warn('song search failed', err?.message || err);
+    throw new HttpError(502, 'החיפוש לא הצליח כרגע. אפשר להדביק את הקישור ידנית.');
+  }
+}
+
 // ---------- player actions ----------
 
 async function login(store, body) {
@@ -145,7 +168,16 @@ async function login(store, body) {
   const players = entries.map((e) => e.name).sort(byName);
 
   if (meta.status === 'setup') {
-    return { status: 'setup', name: me?.name ?? name, registered: !!me, url: me?.url ?? null, players };
+    return {
+      status: 'setup',
+      name: me?.name ?? name,
+      registered: !!me,
+      url: me?.url ?? null,
+      title: me?.title ?? null,
+      artist: me?.artist ?? null,
+      image: me?.image ?? null,
+      players,
+    };
   }
   if (!me) {
     throw new HttpError(404, 'לא מצאנו את השם הזה. בדקו את האיות או בקשו מהמנחה להוסיף אתכם.');
@@ -327,7 +359,10 @@ async function adminNewGame(store) {
 
 // ---------- router ----------
 
-export async function handle({ method, path, body, adminCode, adminSecret, fetchMeta = fetchSongMeta }, store) {
+export async function handle(
+  { method, path, body, query, adminCode, adminSecret, fetchMeta = fetchSongMeta, searchTracks = searchSpotifyTracks },
+  store,
+) {
   try {
     const p = path.replace(/^\/api/, '').replace(/\/+$/, '') || '/';
     if (p.startsWith('/admin/')) requireAdmin(adminCode, adminSecret);
@@ -338,6 +373,7 @@ export async function handle({ method, path, body, adminCode, adminSecret, fetch
         const { blobs } = await store.list({ prefix: 'entries/' });
         return ok({ status: meta.status, count: blobs.length });
       }
+      case 'GET /search-songs': return ok(await searchSongs(query?.q, searchTracks));
       case 'POST /login': return ok(await login(store, body));
       case 'POST /join': return ok(await join(store, body, fetchMeta));
       case 'POST /submit': return ok(await submit(store, body));

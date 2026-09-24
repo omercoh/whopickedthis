@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { handle } from '../netlify/functions/lib/game.mjs';
+import { SpotifyNotConfiguredError } from '../netlify/functions/lib/spotify-search.mjs';
 import { memoryStore } from './memory-store.mjs';
 
 const SECRET = 'hostcode';
@@ -8,14 +9,15 @@ const SP = (id) => `https://open.spotify.com/track/${id}`;
 const YT = (id) => `https://www.youtube.com/watch?v=${id}`;
 
 const stubMeta = async () => ({ title: 'Test Song', artist: 'Test Artist', image: 'https://img.example/cover.jpg' });
+const stubSearch = async () => [];
 
-function client(store, fetchMeta = stubMeta) {
-  const call = (method, path, body, adminCode) =>
-    handle({ method, path: '/api' + path, body, adminCode, adminSecret: SECRET, fetchMeta }, store);
+function client(store, fetchMeta = stubMeta, searchTracks = stubSearch) {
+  const call = (method, path, body, adminCode, query) =>
+    handle({ method, path: '/api' + path, body, adminCode, adminSecret: SECRET, fetchMeta, searchTracks, query }, store);
   return {
     call,
     post: (p, b) => call('POST', p, b),
-    get: (p) => call('GET', p),
+    get: (p, query) => call('GET', p, undefined, undefined, query),
     admin: (method, p, b) => call(method, '/admin' + p, b, SECRET),
   };
 }
@@ -133,7 +135,10 @@ test('host can add a player without a song link; they add it later, or the host 
 
   // Cy logs in themselves and sees they still need to add a song
   const cyLogin = (await c.post('/login', { name: 'Cy' })).data;
-  assert.deepEqual(cyLogin, { status: 'setup', name: 'Cy', registered: true, url: null, players: ['Ana', 'Ben', 'Cy'] });
+  assert.deepEqual(cyLogin, {
+    status: 'setup', name: 'Cy', registered: true, url: null, title: null, artist: null, image: null,
+    players: ['Ana', 'Ben', 'Cy'],
+  });
 
   // Cy adds their own song -> now the game can start
   assert.equal((await c.post('/join', { name: 'Cy', url: SP('3') })).status, 200);
@@ -250,4 +255,29 @@ test('back to setup clears answers; new game wipes everything', async () => {
   o = (await c.admin('GET', '/overview')).data;
   assert.equal(o.entries.length, 0);
   assert.equal((await c.get('/status')).data.status, 'setup');
+});
+
+test('song search: skips short queries, returns results, and surfaces config/lookup errors', async () => {
+  let calls = 0;
+  const counting = async () => { calls += 1; return []; };
+  const c1 = client(memoryStore(), stubMeta, counting);
+  assert.deepEqual((await c1.get('/search-songs', { q: 'a' })).data, { results: [] });
+  assert.deepEqual((await c1.get('/search-songs', {})).data, { results: [] });
+  assert.equal(calls, 0); // too short to bother searching
+
+  const found = [{ url: SP('x'), title: 'Song', artist: 'Artist', image: null }];
+  const c2 = client(memoryStore(), stubMeta, async (q) => {
+    assert.equal(q, 'daft punk');
+    return found;
+  });
+  assert.deepEqual((await c2.get('/search-songs', { q: 'daft punk' })).data, { results: found });
+
+  const c3 = client(memoryStore(), stubMeta, async () => { throw new SpotifyNotConfiguredError('nope'); });
+  const r3 = await c3.get('/search-songs', { q: 'abc' });
+  assert.equal(r3.status, 500);
+  assert.match(r3.data.error, /SPOTIFY_CLIENT_ID/);
+
+  const c4 = client(memoryStore(), stubMeta, async () => { throw new Error('boom'); });
+  const r4 = await c4.get('/search-songs', { q: 'abc' });
+  assert.equal(r4.status, 502);
 });
