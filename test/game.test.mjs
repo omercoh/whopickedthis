@@ -7,9 +7,11 @@ const SECRET = 'hostcode';
 const SP = (id) => `https://open.spotify.com/track/${id}`;
 const YT = (id) => `https://www.youtube.com/watch?v=${id}`;
 
-function client(store) {
+const stubMeta = async () => ({ title: 'Test Song', artist: 'Test Artist' });
+
+function client(store, fetchMeta = stubMeta) {
   const call = (method, path, body, adminCode) =>
-    handle({ method, path: '/api' + path, body, adminCode, adminSecret: SECRET }, store);
+    handle({ method, path: '/api' + path, body, adminCode, adminSecret: SECRET, fetchMeta }, store);
   return {
     call,
     post: (p, b) => call('POST', p, b),
@@ -52,6 +54,30 @@ test('join validates names and links', async () => {
   assert.equal((await c.post('/join', { name: 'Ana', url: 'https://youtu.be/abc' })).status, 200);
 });
 
+test('song metadata is fetched on join and reused when the link is unchanged', async () => {
+  let calls = 0;
+  const fetchMeta = async () => { calls += 1; return { title: 'Song', artist: 'Artist' }; };
+  const c = client(memoryStore(), fetchMeta);
+  await c.post('/join', { name: 'Ana', url: SP('1') });
+  assert.equal(calls, 1);
+  let o = (await c.admin('GET', '/overview')).data;
+  assert.deepEqual([o.entries[0].title, o.entries[0].artist], ['Song', 'Artist']);
+
+  // same link again -> no re-fetch, metadata kept
+  await c.post('/join', { name: 'Ana', url: SP('1') });
+  assert.equal(calls, 1);
+
+  // new link -> re-fetched
+  await c.post('/join', { name: 'Ana', url: SP('2') });
+  assert.equal(calls, 2);
+
+  // metadata lookup failure doesn't block joining
+  const c2 = client(memoryStore(), async () => null);
+  assert.equal((await c2.post('/join', { name: 'Ben', url: SP('x') })).status, 200);
+  o = (await c2.admin('GET', '/overview')).data;
+  assert.deepEqual([o.entries[0].title, o.entries[0].artist], [null, null]);
+});
+
 test('names are unique case-insensitively; rejoining updates the song', async () => {
   const c = client(memoryStore());
   await c.post('/join', { name: 'Ana', url: SP('1') });
@@ -84,7 +110,7 @@ test('players never see who picked what while the quiz is live', async () => {
   assert.equal(r.data.status, 'live');
   assert.equal(r.data.songs.length, 4);
   assert.deepEqual(r.data.players, ['Ben', 'Cy', 'Dee']);
-  assert.deepEqual(Object.keys(r.data.songs[0]).sort(), ['id', 'n', 'platform', 'url']);
+  assert.deepEqual(Object.keys(r.data.songs[0]).sort(), ['artist', 'id', 'n', 'platform', 'title', 'url']);
   assert.equal((await c.post('/login', { name: 'Zed' })).status, 404);
 });
 
@@ -112,12 +138,24 @@ test('full flow: submit, scoring, results only after finish', async () => {
   assert.ok(rAna.review.every((r) => r.own || r.correct === true));
   assert.equal(rAna.review.filter((r) => r.own).length, 1);
 
+  // everyone sees the same full leaderboard, not just their own score
+  const expectedLeaderboard = [
+    { name: 'Ana', submitted: true, score: 3, total: 3 },
+    { name: 'Ben', submitted: true, score: 0, total: 3 },
+    { name: 'Cy', submitted: false, score: null, total: null },
+    { name: 'Dee', submitted: false, score: null, total: null },
+  ];
+  assert.deepEqual(rAna.leaderboard, expectedLeaderboard);
+
   const rBen = (await c.post('/login', { name: 'Ben' })).data;
   assert.equal(rBen.total, 3);
   assert.equal(rBen.score, 0);
   assert.ok(rBen.review.filter((r) => !r.own).every((r) => r.correct === false && r.answer));
+  assert.deepEqual(rBen.leaderboard, expectedLeaderboard);
 
-  assert.deepEqual((await c.post('/login', { name: 'Cy' })).data, { status: 'finished', name: 'Cy', submitted: false });
+  const rCy = (await c.post('/login', { name: 'Cy' })).data;
+  assert.deepEqual(rCy, { status: 'finished', name: 'Cy', submitted: false, leaderboard: expectedLeaderboard });
+
   assert.equal((await c.post('/submit', { name: 'Cy', guesses: {} })).status, 409);
   assert.equal((await c.post('/join', { name: 'Late', url: SP('z') })).status, 409);
 });

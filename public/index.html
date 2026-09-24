@@ -124,8 +124,9 @@ input:focus, select:focus { border-color: var(--cobalt); }
 }
 .listen::before { content: ''; border-left: 11px solid currentColor; border-top: 7px solid transparent; border-bottom: 7px solid transparent; }
 .listen:hover { background: var(--ink); color: var(--paper); }
-.track .body > * + * { margin-top: 10px; }
+.track .body > * + *, .res > div > * + * { margin-top: 10px; }
 .mine-note { font-weight: 700; }
+.song-title { font: 800 1.05rem/1.3 var(--display); }
 
 .submitbar { position: sticky; bottom: 0; z-index: 2; background: var(--paper); border-top: 2px solid var(--ink); padding: 12px 16px 14px; margin: 0 -16px; }
 .progress { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; margin: 8px 0 12px; }
@@ -142,6 +143,15 @@ input:focus, select:focus { border-color: var(--cobalt); }
 .res.bad .verdict { background: var(--bad-bg); color: var(--bad); }
 .res.own .verdict { background: color-mix(in srgb, var(--sun) 30%, transparent); }
 .verdict strong { font-weight: 800; }
+
+.leaderboard { list-style: none; margin: 12px 0 0; padding: 0; border-top: 3px solid var(--ink); }
+.lb-row { display: grid; grid-template-columns: 30px 1fr auto; align-items: center; column-gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.lb-rank { font: 800 1.1rem/1 var(--display); color: var(--muted); }
+.lb-name { font-weight: 700; }
+.lb-score { font-weight: 700; }
+.lb-row.mine { background: color-mix(in srgb, var(--sun) 30%, transparent); margin-inline: -10px; padding-inline: 10px; border-radius: 12px; }
+.lb-row.waiting { opacity: .6; }
+.lb-row.waiting .lb-score { font-weight: 500; font-style: italic; }
 
 /* dialog + toast */
 dialog { border: 2px solid var(--ink); border-radius: 20px; background: var(--card); color: var(--ink); padding: 22px; max-width: min(420px, 92vw); }
@@ -195,6 +205,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const safeUrl = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : '#'; } catch { return '#'; } };
   const PLATFORM = { spotify: 'Spotify', youtube: 'YouTube' };
+  const songLabel = (s) => (s.artist && s.title ? `${s.artist} - ${s.title}` : s.title || `שיר מס׳ ${s.n}`);
   const nk = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 
   const local = {
@@ -406,13 +417,14 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
 
     const rows = d.songs.map((s) => {
       const mine = s.id === d.mySongId;
+      const label = songLabel(s);
       const listen = `<a class="listen" href="${esc(safeUrl(s.url))}" target="_blank" rel="noopener noreferrer">האזנה ב-${PLATFORM[s.platform] || 'רשת'}</a>`;
       if (mine) {
-        return `<li class="track mine"><span class="n">${s.n}</span><div class="body">${listen}<p class="mine-note">בחרת בשיר הזה. דלגו עליו.</p></div></li>`;
+        return `<li class="track mine"><span class="n">${s.n}</span><div class="body"><p class="song-title">${esc(label)}</p>${listen}<p class="mine-note">בחרת בשיר הזה. דלגו עליו.</p></div></li>`;
       }
       const opts = d.players.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
-      return `<li class="track" data-id="${esc(s.id)}"><span class="n">${s.n}</span><div class="body">${listen}
-        <div><label for="sel-${esc(s.id)}" class="small">מי בחר את שיר מס׳ ${s.n}?</label>
+      return `<li class="track" data-id="${esc(s.id)}"><span class="n">${s.n}</span><div class="body"><p class="song-title">${esc(label)}</p>${listen}
+        <div><label for="sel-${esc(s.id)}" class="small">מי בחר את ${esc(label)}?</label>
         <select id="sel-${esc(s.id)}" data-song="${esc(s.id)}"><option value="">בחרו אדם</option>${opts}</select></div></div></li>`;
     }).join('');
 
@@ -430,14 +442,14 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     `, { title: 'התאמת השירים', wide: false });
     wireHome();
 
-    const songNo = Object.fromEntries(d.songs.map((s) => [s.id, s.n]));
+    const songLabels = Object.fromEntries(d.songs.map((s) => [s.id, songLabel(s)]));
     function refresh() {
       $$('select[data-song]').forEach((sel) => {
         const id = sel.dataset.song;
         $$('option', sel).forEach((o) => {
           if (!o.value) return;
           const usedOn = Object.entries(draft).find(([sid, nm]) => nm === o.value && sid !== id);
-          o.textContent = usedOn ? `${o.value} (בשיר מס׳ ${songNo[usedOn[0]]})` : o.value;
+          o.textContent = usedOn ? `${o.value} (${songLabels[usedOn[0]]})` : o.value;
         });
         sel.value = draft[id] || '';
         sel.closest('.track').classList.toggle('done', !!draft[id]);
@@ -490,13 +502,30 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     wireHome();
   }
 
+  function leaderboardHtml(rows, myName) {
+    let rank = 0;
+    const items = rows.map((r) => {
+      const mine = nk(r.name) === nk(myName);
+      if (r.submitted) rank += 1;
+      const scoreText = r.submitted ? `${r.score} / ${r.total}` : 'עדיין לא הגיש/ה';
+      return `<li class="lb-row${mine ? ' mine' : ''}${r.submitted ? '' : ' waiting'}">
+        <span class="lb-rank">${r.submitted ? rank : ''}</span>
+        <span class="lb-name">${esc(r.name)}</span>
+        <span class="lb-score">${scoreText}</span>
+      </li>`;
+    }).join('');
+    return `<div class="stack"><h3>טבלת התוצאות</h3><ol class="leaderboard">${items}</ol></div>`;
+  }
+
   function renderFinished(d) {
+    const board = leaderboardHtml(d.leaderboard, d.name);
     if (!d.submitted) {
       setView(`
         ${topbar(d.name)}
         <div class="stack">
           <h2>המשחק הסתיים</h2>
-          <p>לא נעלתם תשובות בסבב הזה, אז אין ניקוד להציג. שאלו את המנחה על המשחק הבא.</p>
+          <p>לא נעלתם תשובות בסבב הזה, אז אין ניקוד להציג לכם. הנה איך כולם הסתדרו:</p>
+          ${board}
         </div>
       `, { title: 'המשחק נגמר' });
       wireHome();
@@ -507,18 +536,20 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
       : d.score >= d.total / 2 ? 'אוזן מוצקה לטעם של החברים שלכם.'
       : 'יש עוד מקום להכיר את החברים שלכם טוב יותר.';
     const rows = d.review.map((r) => {
+      const label = songLabel(r);
       const listen = `<a class="listen" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer">האזנה ב-${PLATFORM[r.platform] || 'רשת'}</a>`;
       let cls, verdict;
       if (r.own) { cls = 'own'; verdict = '<strong>שלכם.</strong> בחרתם בשיר הזה.'; }
       else if (r.correct) { cls = 'good'; verdict = `<strong>נכון.</strong> ${esc(r.answer)} בחר/ה בו.`; }
       else { cls = 'bad'; verdict = `<strong>לא בדיוק.</strong> אמרתם ${esc(r.guess)}. זה היה ${esc(r.answer)}.`; }
-      return `<li class="res ${cls}"><span class="n">${r.n}</span><div>${listen}<p class="verdict">${verdict}</p></div></li>`;
+      return `<li class="res ${cls}"><span class="n">${r.n}</span><div><p class="song-title">${esc(label)}</p>${listen}<p class="verdict">${verdict}</p></div></li>`;
     }).join('');
     setView(`
       ${topbar(d.name)}
       <h2>הניקוד שלכם</h2>
       <div class="score">${d.score}<small> / ${d.total}</small></div>
       <p>${esc(line)}</p>
+      ${board}
       <ol class="results">${rows}</ol>
     `, { title: `ניקוד: ${d.score}/${d.total}` });
     wireHome();
@@ -599,15 +630,15 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
       actions = `<button class="btn" data-action="status" data-status="live" ${enough ? '' : 'disabled'}>התחלת החידון</button>`;
     } else if (status === 'live') {
       actions = `<button class="btn" data-action="status" data-status="finished">סיום המשחק והצגת תוצאות</button>
-                 <button class="btn ghost" data-action="status" data-status="setup">חזרה להגדרות</button>`;
+                 <button class="btn ghost" data-action="status" data-status="setup">איפוס משחק</button>`;
     } else {
       actions = `<button class="btn" data-action="status" data-status="live">פתיחה מחדש של החידון</button>
-                 <button class="btn ghost" data-action="status" data-status="setup">חזרה להגדרות</button>`;
+                 <button class="btn ghost" data-action="status" data-status="setup">איפוס משחק</button>`;
     }
     const hint = status === 'setup'
       ? (entries.length >= d.minPlayers ? `${entries.length} שחקנים מוכנים.` : `הוסיפו לפחות ${d.minPlayers} שחקנים כדי להתחיל (${entries.length} עד כה).`)
       : status === 'live' ? `${subCount} מתוך ${entries.length} שחקנים הגישו תשובות.`
-      : `${subCount} מתוך ${entries.length} שחקנים הגישו תשובות. כל אחד יכול עכשיו לראות את התוצאות שלו.`;
+      : `${subCount} מתוך ${entries.length} שחקנים הגישו תשובות. כל אחד יכול עכשיו לראות את טבלת התוצאות.`;
 
     setView(`
       <div class="bar">
@@ -642,7 +673,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
         <div><label for="add-name">שם השחקן</label><input id="add-name" name="name" maxlength="30" required dir="auto"></div>
         <div><label for="add-url">קישור מ-Spotify או YouTube</label><input id="add-url" name="url" type="url" inputmode="url" required placeholder="https://…" dir="ltr"></div>
         <button class="btn" type="submit">הוספת שיר</button>
-      </form>` : `<p class="muted small">השירים נעולים בזמן שהחידון פעיל. השתמשו ב״חזרה להגדרות״ כדי לשנות אותם (זה מוחק את התשובות שהוגשו).</p>`;
+      </form>` : `<p class="muted small">השירים נעולים בזמן שהחידון פעיל. השתמשו ב״איפוס משחק״ כדי לשנות אותם (זה מוחק את התשובות שהוגשו).</p>`;
     const rows = list.map((e) => {
       if (setup && admin.editing === nk(e.name)) {
         return `<li class="entry"><form data-form="entry" autocomplete="off">
@@ -734,7 +765,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
         });
         if (!ok) return;
       } else if (next === 'setup') {
-        const ok = await askConfirm({ title: 'לחזור להגדרות?', body: 'זה מוחק את כל התשובות שהוגשו. השחקנים והשירים יישארו.', ok: 'חזרה להגדרות', danger: true });
+        const ok = await askConfirm({ title: 'לאפס את המשחק?', body: 'זה מוחק את כל התשובות שהוגשו. השחקנים והשירים יישארו.', ok: 'איפוס משחק', danger: true });
         if (!ok) return;
       }
       mutate(() => api('/admin/status', { method: 'POST', admin: true, body: { status: next } }).then(() => { admin.tab = next === 'setup' ? 'players' : 'picks'; }));
