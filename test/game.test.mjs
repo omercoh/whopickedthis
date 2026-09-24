@@ -116,6 +116,40 @@ test('cannot start with fewer than 3 players', async () => {
   assert.equal((await c.admin('POST', '/status', { status: 'live' })).status, 400);
 });
 
+test('host can add a player without a song link; they add it later, or the host does', async () => {
+  const c = client(memoryStore());
+  await c.post('/join', { name: 'Ana', url: SP('1') });
+  await c.post('/join', { name: 'Ben', url: SP('2') });
+  assert.equal((await c.admin('POST', '/entry', { name: 'Cy' })).status, 200); // no url at all
+
+  let o = (await c.admin('GET', '/overview')).data;
+  const cy = o.entries.find((e) => e.name === 'Cy');
+  assert.deepEqual([cy.url, cy.platform, cy.title, cy.artist, cy.image], [null, null, null, null, null]);
+
+  // enough players, but Cy still has no song -> can't start
+  assert.equal(o.entries.length, 3);
+  let live = await c.admin('POST', '/status', { status: 'live' });
+  assert.equal(live.status, 400);
+
+  // Cy logs in themselves and sees they still need to add a song
+  const cyLogin = (await c.post('/login', { name: 'Cy' })).data;
+  assert.deepEqual(cyLogin, { status: 'setup', name: 'Cy', registered: true, url: null, players: ['Ana', 'Ben', 'Cy'] });
+
+  // Cy adds their own song -> now the game can start
+  assert.equal((await c.post('/join', { name: 'Cy', url: SP('3') })).status, 200);
+  live = await c.admin('POST', '/status', { status: 'live' });
+  assert.equal(live.status, 200);
+  await c.admin('POST', '/status', { status: 'setup' });
+
+  // alternatively, the host could have added the link for a player who never comes back
+  assert.equal((await c.admin('POST', '/entry', { name: 'Dee' })).status, 200);
+  live = await c.admin('POST', '/status', { status: 'live' });
+  assert.equal(live.status, 400);
+  assert.equal((await c.admin('POST', '/entry', { oldName: 'Dee', name: 'Dee', url: SP('4') })).status, 200);
+  live = await c.admin('POST', '/status', { status: 'live' });
+  assert.equal(live.status, 200);
+});
+
 test('players never see who picked what while the quiz is live', async () => {
   const c = await seededGame();
   await c.admin('POST', '/status', { status: 'live' });

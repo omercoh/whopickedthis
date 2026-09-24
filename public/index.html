@@ -173,6 +173,7 @@ dialog .row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 1
 .entry { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); }
 .entry .who { font-weight: 700; }
 .entry .link { display: block; font-size: .9rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+.entry .link.waiting-song { font-style: italic; }
 .entry form { grid-column: 1 / -1; display: grid; gap: 10px; }
 .grid2 { display: grid; gap: 10px; }
 @media (min-width: 640px) { .grid2 { grid-template-columns: 1fr 2fr auto; align-items: end; } }
@@ -351,7 +352,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     if (d.status === 'setup') renderSetup(d);
     else if (d.status === 'live') (d.submitted ? renderWaiting(d) : renderQuiz(d));
     else renderFinished(d);
-    const sig = (x) => [x.status, x.submitted, x.registered].join('|');
+    const sig = (x) => [x.status, x.submitted, x.registered, x.url].join('|');
     startPoll(async () => {
       const next = await api('/login', { method: 'POST', body: { name: d.name } });
       if (sig(next) !== sig(current)) show(next);
@@ -368,19 +369,26 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
   function updateChips(players) { const el = $('#chips'); if (el) el.innerHTML = chipsHtml(players); }
 
   function renderSetup(d) {
+    const hasSong = d.registered && !!d.url;
+    const heading = hasSong ? `נרשמת, ${esc(d.name)}`
+      : d.registered ? `היי ${esc(d.name)}, נשאר רק להוסיף שיר`
+      : `היי ${esc(d.name)}, הוסיפו את השיר שלכם`;
+    const intro = hasSong
+      ? `<p>השיר שלך: <a dir="ltr" href="${esc(safeUrl(d.url))}" target="_blank" rel="noopener noreferrer">${esc(d.url)}</a></p>`
+      : d.registered
+        ? '<p class="muted">המנחה כבר רשם אתכם למשחק. בחרו שיר שהאחרים אולי לא ינחשו ששייך לכם, ואז הדביקו את הקישור מ-Spotify או YouTube.</p>'
+        : '<p class="muted">בחרו שיר שהאחרים אולי לא ינחשו ששייך לכם, ואז הדביקו את הקישור מ-Spotify או YouTube.</p>';
     setView(`
       ${topbar(d.name)}
       <div class="stack">
-        <h2>${d.registered ? `נרשמת, ${esc(d.name)}` : `היי ${esc(d.name)}, הוסיפו את השיר שלכם`}</h2>
-        ${d.registered
-          ? `<p>השיר שלך: <a dir="ltr" href="${esc(safeUrl(d.url))}" target="_blank" rel="noopener noreferrer">${esc(d.url)}</a></p>`
-          : '<p class="muted">בחרו שיר שהאחרים אולי לא ינחשו ששייך לכם, ואז הדביקו את הקישור מ-Spotify או YouTube.</p>'}
+        <h2>${heading}</h2>
+        ${intro}
         <form id="song-form" class="stack" autocomplete="off">
           <div>
-            <label for="url">${d.registered ? 'שינוי השיר שלך' : 'קישור מ-Spotify או YouTube'}</label>
+            <label for="url">${hasSong ? 'שינוי השיר שלך' : 'קישור מ-Spotify או YouTube'}</label>
             <input id="url" type="url" inputmode="url" required placeholder="https://open.spotify.com/track/…" autocapitalize="none" dir="ltr">
           </div>
-          <button class="btn block" type="submit">${d.registered ? 'עדכון השיר שלי' : 'שמירת השיר שלי'}</button>
+          <button class="btn block" type="submit">${hasSong ? 'עדכון השיר שלי' : 'שמירת השיר שלי'}</button>
           <p id="error" class="error" role="alert"></p>
         </form>
         <div>
@@ -629,9 +637,11 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     const subCount = submissions.length;
     const statusLabel = { setup: 'אוספים שירים', live: 'החידון פעיל', finished: 'התוצאות התקבלו' }[status];
 
+    const missing = entries.filter((e) => !e.url).length;
+
     let actions = '';
     if (status === 'setup') {
-      const enough = entries.length >= d.minPlayers;
+      const enough = entries.length >= d.minPlayers && missing === 0;
       actions = `<button class="btn" data-action="status" data-status="live" ${enough ? '' : 'disabled'}>התחלת החידון</button>`;
     } else if (status === 'live') {
       actions = `<button class="btn" data-action="status" data-status="finished">סיום המשחק והצגת תוצאות</button>
@@ -641,7 +651,9 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
                  <button class="btn ghost" data-action="status" data-status="setup">איפוס משחק</button>`;
     }
     const hint = status === 'setup'
-      ? (entries.length >= d.minPlayers ? `${entries.length} שחקנים מוכנים.` : `הוסיפו לפחות ${d.minPlayers} שחקנים כדי להתחיל (${entries.length} עד כה).`)
+      ? (entries.length < d.minPlayers ? `הוסיפו לפחות ${d.minPlayers} שחקנים כדי להתחיל (${entries.length} עד כה).`
+        : missing > 0 ? `${missing} שחקנים עדיין לא הוסיפו שיר. אי אפשר להתחיל עד שלכולם יהיה שיר.`
+        : `${entries.length} שחקנים מוכנים.`)
       : status === 'live' ? `${subCount} מתוך ${entries.length} שחקנים הגישו תשובות.`
       : `${subCount} מתוך ${entries.length} שחקנים הגישו תשובות. כל אחד יכול עכשיו לראות את טבלת התוצאות.`;
 
@@ -676,15 +688,15 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     const add = setup ? `
       <form class="panel grid2" data-form="entry" autocomplete="off">
         <div><label for="add-name">שם השחקן</label><input id="add-name" name="name" maxlength="30" required dir="auto"></div>
-        <div><label for="add-url">קישור מ-Spotify או YouTube</label><input id="add-url" name="url" type="url" inputmode="url" required placeholder="https://…" dir="ltr"></div>
-        <button class="btn" type="submit">הוספת שיר</button>
+        <div><label for="add-url">קישור מ-Spotify או YouTube (אפשר להוסיף מאוחר יותר)</label><input id="add-url" name="url" type="url" inputmode="url" placeholder="https://… (לא חובה)" dir="ltr"></div>
+        <button class="btn" type="submit">הוספת שחקן</button>
       </form>` : `<p class="muted small">השירים נעולים בזמן שהחידון פעיל. השתמשו ב״איפוס משחק״ כדי לשנות אותם (זה מוחק את התשובות שהוגשו).</p>`;
     const rows = list.map((e) => {
       if (setup && admin.editing === nk(e.name)) {
         return `<li class="entry"><form data-form="entry" autocomplete="off">
           <input type="hidden" name="oldName" value="${esc(e.name)}">
           <div><label for="edit-name">שם השחקן</label><input id="edit-name" name="name" maxlength="30" required value="${esc(e.name)}" dir="auto"></div>
-          <div><label for="edit-url">קישור מ-Spotify או YouTube</label><input id="edit-url" name="url" type="url" required value="${esc(e.url)}" dir="ltr"></div>
+          <div><label for="edit-url">קישור מ-Spotify או YouTube</label><input id="edit-url" name="url" type="url" placeholder="https://… (לא חובה)" value="${esc(e.url)}" dir="ltr"></div>
           <div class="actions"><button class="btn sm" type="submit">שמירה</button>
           <button class="btn ghost sm" type="button" data-action="cancel-edit">ביטול</button></div></form></li>`;
       }
@@ -692,8 +704,10 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
         ? `<div class="actions"><button class="btn ghost sm" data-action="edit" data-name="${esc(e.name)}">עריכה</button>
            <button class="btn ghost danger sm" data-action="delete" data-name="${esc(e.name)}">הסרה</button></div>`
         : `<span class="small muted">שיר מס׳ ${e.n}</span>`;
-      return `<li class="entry"><div><span class="who">${esc(e.name)}</span>
-        <a class="link" dir="ltr" href="${esc(safeUrl(e.url))}" target="_blank" rel="noopener noreferrer">${PLATFORM[e.platform] || ''}: ${esc(e.url)}</a></div>${controls}</li>`;
+      const link = e.url
+        ? `<a class="link" dir="ltr" href="${esc(safeUrl(e.url))}" target="_blank" rel="noopener noreferrer">${PLATFORM[e.platform] || ''}: ${esc(e.url)}</a>`
+        : '<span class="link waiting-song">עדיין לא הוסיף/ה שיר</span>';
+      return `<li class="entry"><div><span class="who">${esc(e.name)}</span>${link}</div>${controls}</li>`;
     }).join('');
     return `<div class="stack">${add}<ul class="entry-list">${rows || '<li class="muted">אין עדיין שחקנים. הוסיפו אחד למעלה, או שתפו את קישור השחקנים כדי שאנשים יוכלו להוסיף את השירים שלהם.</li>'}</ul></div>`;
   }
@@ -789,7 +803,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     const fd = new FormData(form);
     const body = { name: fd.get('name'), url: fd.get('url') };
     if (fd.get('oldName')) body.oldName = fd.get('oldName');
-    mutate(() => api('/admin/entry', { method: 'POST', admin: true, body }).then(() => { admin.editing = null; }), body.oldName ? 'נשמר' : 'השיר נוסף');
+    mutate(() => api('/admin/entry', { method: 'POST', admin: true, body }).then(() => { admin.editing = null; }), body.oldName ? 'נשמר' : 'השחקן נוסף');
   }
 
   /* ---------- start ---------- */
