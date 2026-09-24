@@ -76,6 +76,18 @@ test('song metadata is fetched on join and reused when the link is unchanged', a
   assert.equal((await c2.post('/join', { name: 'Ben', url: SP('x') })).status, 200);
   o = (await c2.admin('GET', '/overview')).data;
   assert.deepEqual([o.entries[0].title, o.entries[0].artist], [null, null]);
+
+  // a failed lookup is retried on the next join/edit, even with the same link
+  let attempt = 0;
+  const flaky = async () => (++attempt === 1 ? null : { title: 'Song', artist: 'Artist' });
+  const c3 = client(memoryStore(), flaky);
+  await c3.post('/join', { name: 'Cy', url: SP('y') });
+  o = (await c3.admin('GET', '/overview')).data;
+  assert.deepEqual([o.entries[0].title, o.entries[0].artist], [null, null]);
+  await c3.post('/join', { name: 'Cy', url: SP('y') });
+  assert.equal(attempt, 2);
+  o = (await c3.admin('GET', '/overview')).data;
+  assert.deepEqual([o.entries[0].title, o.entries[0].artist], ['Song', 'Artist']);
 });
 
 test('names are unique case-insensitively; rejoining updates the song', async () => {

@@ -78,6 +78,7 @@ async function loadEntries(store) {
 }
 
 const findEntry = (entries, name) => entries.find((e) => nameKey(e.name) === nameKey(name));
+const hasMeta = (e) => !!(e?.title || e?.artist);
 const publicSong = (e) => ({
   id: e.songId,
   n: e.n,
@@ -168,7 +169,7 @@ async function join(store, body, fetchMeta) {
   const entries = await loadEntries(store);
   const existing = findEntry(entries, name);
   if (!existing && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'המשחק הזה מלא.');
-  const info = existing?.url === url ? existing : await fetchMeta(url, platform);
+  const info = existing?.url === url && hasMeta(existing) ? existing : await fetchMeta(url, platform);
   await store.setJSON(entryKey(existing?.name ?? name), {
     name: existing?.name ?? name,
     url,
@@ -250,7 +251,7 @@ async function adminSaveEntry(store, body, fetchMeta) {
   if (!old && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'המשחק הזה מלא.');
 
   const base = old;
-  const info = base?.url === url ? base : await fetchMeta(url, platform);
+  const info = base?.url === url && hasMeta(base) ? base : await fetchMeta(url, platform);
   if (old && entryKey(old.name) !== entryKey(name)) await store.delete(entryKey(old.name));
   await store.setJSON(entryKey(name), {
     name,
