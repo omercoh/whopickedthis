@@ -17,6 +17,7 @@ export default async (req) => {
       method: req.method,
       path: url.pathname,
       body,
+      query: Object.fromEntries(url.searchParams),
       adminCode: req.headers.get('x-admin-code'),
       adminSecret: process.env.ADMIN_CODE,
     },
