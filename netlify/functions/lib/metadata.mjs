@@ -1,7 +1,7 @@
-// Best-effort artist/title lookup for a song link, so the app can show
-// "Artist - Song" instead of a bare track number. Any failure (network,
-// unexpected markup, private/removed track) just yields no metadata —
-// callers fall back to the numbered placeholder.
+// Best-effort artist/title/artwork lookup for a song link, so the app can
+// show "Artist - Song" and a thumbnail instead of a bare track number. Any
+// failure (network, unexpected markup, private/removed track) just yields
+// no metadata — callers fall back to the numbered placeholder.
 
 const FETCH_TIMEOUT_MS = 4000;
 // A real browser UA: Spotify's track pages render Open Graph tags for link
@@ -50,18 +50,18 @@ function spotifyArtistFromDescription(description) {
   return parts[1] || null;
 }
 
-// Spotify's public oEmbed only ever returns the track name (no artist field),
-// but it's a stable documented JSON API, so it's the most reliable source for
-// the title. The track page's Open Graph tags are the only place the artist
-// shows up, but scraping HTML is inherently more fragile, so that part is
-// allowed to fail without losing the title we already have.
-async function fetchSpotifyOembedTitle(url) {
+// Spotify's public oEmbed only ever returns the track name and artwork (no
+// artist field), but it's a stable documented JSON API, so it's the most
+// reliable source for those two. The track page's Open Graph tags are the
+// only place the artist shows up, but scraping HTML is inherently more
+// fragile, so that part is allowed to fail without losing what we already have.
+async function fetchSpotifyOembed(url) {
   const res = await fetchWithTimeout(`https://open.spotify.com/oembed?url=${encodeURIComponent(url)}`, {
     headers: { 'user-agent': UA },
   });
   if (!res.ok) { console.warn('spotify oembed failed', res.status, url); return null; }
   const data = await res.json();
-  return data?.title || null;
+  return { title: data?.title || null, image: data?.thumbnail_url || null };
 }
 
 async function fetchSpotifyPageTags(url) {
@@ -71,13 +71,14 @@ async function fetchSpotifyPageTags(url) {
 }
 
 async function fetchSpotifyMeta(url) {
-  const [oembedTitle, tags] = await Promise.all([
-    fetchSpotifyOembedTitle(url).catch((err) => { console.warn('spotify oembed error', err?.message || err); return null; }),
+  const [oembed, tags] = await Promise.all([
+    fetchSpotifyOembed(url).catch((err) => { console.warn('spotify oembed error', err?.message || err); return null; }),
     fetchSpotifyPageTags(url).catch((err) => { console.warn('spotify page error', err?.message || err); return null; }),
   ]);
-  const title = oembedTitle || tags?.['og:title'] || null;
+  const title = oembed?.title || tags?.['og:title'] || null;
   if (!title) return null;
-  return { title, artist: spotifyArtistFromDescription(tags?.['og:description']) };
+  const image = oembed?.image || tags?.['og:image'] || null;
+  return { title, artist: spotifyArtistFromDescription(tags?.['og:description']), image };
 }
 
 function splitYoutubeTitle(rawTitle, authorName) {
@@ -97,7 +98,7 @@ async function fetchYoutubeMeta(url) {
   if (!res.ok) { console.warn('youtube oembed failed', res.status, url); return null; }
   const data = await res.json();
   if (!data?.title) return null;
-  return splitYoutubeTitle(data.title, data.author_name);
+  return { ...splitYoutubeTitle(data.title, data.author_name), image: data.thumbnail_url || null };
 }
 
 export async function fetchSongMeta(url, platform) {

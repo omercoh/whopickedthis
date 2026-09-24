@@ -4,7 +4,7 @@
 //
 // Data layout:
 //   meta                -> { status: 'setup' | 'live' | 'finished' }
-//   entries/<nameKey>   -> { name, url, platform, title, artist, songId, createdAt }
+//   entries/<nameKey>   -> { name, url, platform, title, artist, image, songId, createdAt }
 //   guesses/<nameKey>   -> { name, guesses: { [songId]: playerName }, submittedAt }
 
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
@@ -86,6 +86,7 @@ const publicSong = (e) => ({
   platform: e.platform,
   title: e.title ?? null,
   artist: e.artist ?? null,
+  image: e.image ?? null,
 });
 
 async function clearGuesses(store) {
@@ -176,6 +177,7 @@ async function join(store, body, fetchMeta) {
     platform,
     title: info?.title ?? null,
     artist: info?.artist ?? null,
+    image: info?.image ?? null,
     songId: existing?.songId ?? randomBytes(4).toString('hex'),
     createdAt: existing?.createdAt ?? Date.now(),
   });
@@ -259,6 +261,7 @@ async function adminSaveEntry(store, body, fetchMeta) {
     platform,
     title: info?.title ?? null,
     artist: info?.artist ?? null,
+    image: info?.image ?? null,
     songId: base?.songId ?? randomBytes(4).toString('hex'),
     createdAt: base?.createdAt ?? Date.now(),
   });
