@@ -28,8 +28,8 @@ const byName = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' });
 
 function cleanName(raw) {
   const name = normName(raw);
-  if (!name) throw new HttpError(400, 'Enter a name.');
-  if (name.length > MAX_NAME) throw new HttpError(400, `Names can be up to ${MAX_NAME} characters.`);
+  if (!name) throw new HttpError(400, 'הזינו שם.');
+  if (name.length > MAX_NAME) throw new HttpError(400, `שם יכול להכיל עד ${MAX_NAME} תווים.`);
   return name;
 }
 
@@ -40,16 +40,16 @@ export function parseSongUrl(raw) {
   try {
     u = new URL(String(raw ?? '').trim());
   } catch {
-    throw new HttpError(400, 'That doesn’t look like a link. Paste the full Spotify or YouTube link.');
+    throw new HttpError(400, 'זה לא נראה כמו קישור. הדביקו את הקישור המלא מ-Spotify או YouTube.');
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') {
-    throw new HttpError(400, 'Links must start with https://');
+    throw new HttpError(400, 'קישורים חייבים להתחיל ב-https://');
   }
   const host = u.hostname.toLowerCase();
   let platform;
   if (['spotify.com', 'spotify.link', 'spoti.fi'].some((d) => hostIs(host, d))) platform = 'spotify';
   else if (['youtube.com', 'youtu.be'].some((d) => hostIs(host, d))) platform = 'youtube';
-  else throw new HttpError(400, 'Use a Spotify or YouTube link.');
+  else throw new HttpError(400, 'השתמשו בקישור מ-Spotify או YouTube.');
   u.protocol = 'https:';
   u.username = '';
   u.password = '';
@@ -114,7 +114,7 @@ async function login(store, body) {
     return { status: 'setup', name: me?.name ?? name, registered: !!me, url: me?.url ?? null, players };
   }
   if (!me) {
-    throw new HttpError(404, 'We can’t find that name. Check the spelling or ask the host to add you.');
+    throw new HttpError(404, 'לא מצאנו את השם הזה. בדקו את האיות או בקשו מהמנחה להוסיף אתכם.');
   }
   const row = await store.get(guessKey(me.name), { type: 'json' });
 
@@ -139,10 +139,10 @@ async function join(store, body) {
   const name = cleanName(body?.name);
   const { url, platform } = parseSongUrl(body?.url);
   const meta = await getMeta(store);
-  if (meta.status !== 'setup') throw new HttpError(409, 'Song collection is closed. Ask the host to add you.');
+  if (meta.status !== 'setup') throw new HttpError(409, 'איסוף השירים סגור. בקשו מהמנחה להוסיף אתכם.');
   const entries = await loadEntries(store);
   const existing = findEntry(entries, name);
-  if (!existing && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'This game is full.');
+  if (!existing && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'המשחק הזה מלא.');
   await store.setJSON(entryKey(existing?.name ?? name), {
     name: existing?.name ?? name,
     url,
@@ -155,15 +155,15 @@ async function join(store, body) {
 
 async function submit(store, body) {
   const meta = await getMeta(store);
-  if (meta.status !== 'live') throw new HttpError(409, 'The quiz isn’t open for answers right now.');
+  if (meta.status !== 'live') throw new HttpError(409, 'החידון לא פתוח לתשובות כרגע.');
   const entries = await loadEntries(store);
   const me = findEntry(entries, body?.name);
-  if (!me) throw new HttpError(404, 'We can’t find that name.');
+  if (!me) throw new HttpError(404, 'לא מצאנו את השם הזה.');
   if (await store.get(guessKey(me.name), { type: 'json' })) {
-    throw new HttpError(409, 'You’ve already submitted your answers.');
+    throw new HttpError(409, 'כבר הגשתם את התשובות שלכם.');
   }
   const raw = body?.guesses;
-  if (!raw || typeof raw !== 'object') throw new HttpError(400, 'Match every song before submitting.');
+  if (!raw || typeof raw !== 'object') throw new HttpError(400, 'התאימו כל שיר לפני ההגשה.');
 
   const others = entries.filter((e) => e !== me);
   const canonical = new Map(others.map((e) => [nameKey(e.name), e.name]));
@@ -171,8 +171,8 @@ async function submit(store, body) {
   const guesses = {};
   for (const song of others) {
     const picked = canonical.get(nameKey(raw[song.songId]));
-    if (!picked) throw new HttpError(400, 'Match every song before submitting.');
-    if (used.has(picked)) throw new HttpError(400, 'Each player can only be matched to one song.');
+    if (!picked) throw new HttpError(400, 'התאימו כל שיר לפני ההגשה.');
+    if (used.has(picked)) throw new HttpError(400, 'כל שחקן יכול להיות מותאם לשיר אחד בלבד.');
     used.add(picked);
     guesses[song.songId] = picked;
   }
@@ -186,12 +186,12 @@ function requireAdmin(code, secret) {
   if (!secret) {
     throw new HttpError(
       500,
-      'ADMIN_CODE isn’t set. Add it in Netlify under Site configuration → Environment variables, then redeploy.',
+      'ה-ADMIN_CODE לא הוגדר. הוסיפו אותו ב-Netlify תחת Site configuration → Environment variables, ואז פרסמו מחדש.',
     );
   }
   const a = createHash('sha256').update(String(code ?? '')).digest();
   const b = createHash('sha256').update(String(secret)).digest();
-  if (!timingSafeEqual(a, b)) throw new HttpError(401, 'That host code isn’t right.');
+  if (!timingSafeEqual(a, b)) throw new HttpError(401, 'קוד המנחה לא נכון.');
 }
 
 async function adminOverview(store) {
@@ -211,15 +211,15 @@ async function adminOverview(store) {
 
 async function adminSaveEntry(store, body) {
   const meta = await getMeta(store);
-  if (meta.status !== 'setup') throw new HttpError(409, 'Songs can only be edited before the quiz starts.');
+  if (meta.status !== 'setup') throw new HttpError(409, 'אפשר לערוך שירים רק לפני תחילת החידון.');
   const name = cleanName(body?.name);
   const { url, platform } = parseSongUrl(body?.url);
   const entries = await loadEntries(store);
   const old = body?.oldName ? findEntry(entries, body.oldName) : null;
-  if (body?.oldName && !old) throw new HttpError(404, 'That player no longer exists.');
+  if (body?.oldName && !old) throw new HttpError(404, 'השחקן הזה כבר לא קיים.');
   const clash = findEntry(entries, name);
-  if (clash && clash !== old) throw new HttpError(409, 'That name is already in the list.');
-  if (!old && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'This game is full.');
+  if (clash && clash !== old) throw new HttpError(409, 'השם הזה כבר קיים ברשימה.');
+  if (!old && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'המשחק הזה מלא.');
 
   const base = old;
   if (old && entryKey(old.name) !== entryKey(name)) await store.delete(entryKey(old.name));
@@ -235,7 +235,7 @@ async function adminSaveEntry(store, body) {
 
 async function adminDeleteEntry(store, body) {
   const meta = await getMeta(store);
-  if (meta.status !== 'setup') throw new HttpError(409, 'Players can only be removed before the quiz starts.');
+  if (meta.status !== 'setup') throw new HttpError(409, 'אפשר להסיר שחקנים רק לפני תחילת החידון.');
   const entries = await loadEntries(store);
   const e = findEntry(entries, body?.name);
   if (e) await store.delete(entryKey(e.name));
@@ -249,7 +249,7 @@ async function adminSetStatus(store, body) {
   if (next === 'live' && from === 'setup') {
     const entries = await loadEntries(store);
     if (entries.length < MIN_PLAYERS) {
-      throw new HttpError(400, `Add at least ${MIN_PLAYERS} players before starting.`);
+      throw new HttpError(400, `הוסיפו לפחות ${MIN_PLAYERS} שחקנים לפני ההתחלה.`);
     }
   } else if (next === 'live' && from === 'finished') {
     // reopen: keep submissions
@@ -258,7 +258,7 @@ async function adminSetStatus(store, body) {
   } else if (next === 'setup' && (from === 'live' || from === 'finished')) {
     await clearGuesses(store);
   } else {
-    throw new HttpError(409, 'That change isn’t possible from the current state.');
+    throw new HttpError(409, 'השינוי הזה לא אפשרי מהמצב הנוכחי.');
   }
   await store.setJSON('meta', { status: next });
   return { ok: true, status: next };
@@ -266,7 +266,7 @@ async function adminSetStatus(store, body) {
 
 async function adminResetGuess(store, body) {
   const meta = await getMeta(store);
-  if (meta.status !== 'live') throw new HttpError(409, 'Answers can only be reset while the quiz is live.');
+  if (meta.status !== 'live') throw new HttpError(409, 'אפשר לאפס תשובות רק כשהחידון פעיל.');
   await store.delete(guessKey(body?.name));
   return { ok: true };
 }
@@ -301,12 +301,12 @@ export async function handle({ method, path, body, adminCode, adminSecret }, sto
       case 'POST /admin/status': return ok(await adminSetStatus(store, body));
       case 'POST /admin/reset-guess': return ok(await adminResetGuess(store, body));
       case 'POST /admin/new-game': return ok(await adminNewGame(store));
-      default: throw new HttpError(404, 'Not found.');
+      default: throw new HttpError(404, 'הנתיב לא נמצא.');
     }
   } catch (e) {
     if (e instanceof HttpError) return { status: e.status, data: { error: e.message } };
     console.error(e);
-    return { status: 500, data: { error: 'Something went wrong on our side. Try again.' } };
+    return { status: 500, data: { error: 'משהו השתבש אצלנו. נסו שוב.' } };
   }
 }
 

@@ -8,7 +8,7 @@ export default async (req) => {
     try {
       body = await req.json();
     } catch {
-      return json(400, { error: 'Invalid request.' });
+      return json(400, { error: 'בקשה לא תקינה.' });
     }
   }
   const store = getStore({ name: 'quiz', consistency: 'strong' });
