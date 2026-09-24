@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#3B3AF0">
+<title>Who picked this?</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Figtree:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --paper: #EEF0FF;
+  --card: #FFFFFF;
+  --ink: #1C1B3A;
+  --muted: #5B5A85;
+  --line: #D4D6F4;
+  --cobalt: #3B3AF0;
+  --on-cobalt: #FFFFFF;
+  --sun: #FFD23F;
+  --good: #0B7F57;
+  --good-bg: #D9F6E9;
+  --bad: #C81F47;
+  --bad-bg: #FDE1E8;
+  --disc-a: #1C1B3A;
+  --disc-b: #302F63;
+  --display: 'Bricolage Grotesque', 'Figtree', system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #131230;
+    --card: #1E1D45;
+    --ink: #EDEDFF;
+    --muted: #A9A8D6;
+    --line: #34336C;
+    --cobalt: #8483FF;
+    --on-cobalt: #10102B;
+    --good: #45DDA0;
+    --good-bg: #123A2E;
+    --bad: #FF7590;
+    --bad-bg: #421728;
+    --disc-a: #0A0A1E;
+    --disc-b: #24235A;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 400 1rem/1.5 'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+h1, h2, h3 { font-family: var(--display); line-height: 1.05; letter-spacing: -0.02em; margin: 0; }
+h2 { font-size: 1.6rem; font-weight: 800; }
+h3 { font-size: 1.15rem; font-weight: 700; }
+p { margin: 0 0 .75rem; }
+a { color: inherit; }
+.wrap { max-width: 640px; margin: 0 auto; padding: 20px 16px 72px; }
+.wrap.wide { max-width: 1040px; }
+.muted { color: var(--muted); }
+.small { font-size: .9rem; }
+.stack > * + * { margin-top: 16px; }
+[hidden] { display: none !important; }
+
+:focus-visible { outline: 3px solid var(--cobalt); outline-offset: 2px; }
+
+/* top bar */
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
+.brand { font: 800 1.1rem var(--display); letter-spacing: -0.01em; text-decoration: none; }
+.linkbtn { background: none; border: 0; padding: 4px 0; font: inherit; color: var(--muted); text-decoration: underline; cursor: pointer; }
+
+/* hero */
+.hero { position: relative; overflow: hidden; background: var(--card); border: 2px solid var(--ink); border-radius: 24px; padding: 28px 22px 24px; }
+.hero h1 { position: relative; z-index: 1; font-size: clamp(2.3rem, 10vw, 4rem); font-weight: 800; }
+.hero p { position: relative; z-index: 1; max-width: 30ch; margin: 14px 0 0; color: var(--muted); }
+.disc {
+  position: absolute; z-index: 0; top: -64px; right: -64px; width: 156px; height: 156px; border-radius: 50%;
+  background:
+    radial-gradient(circle, var(--sun) 0 5px, transparent 6px),
+    radial-gradient(circle, var(--cobalt) 0 24px, transparent 25px),
+    repeating-radial-gradient(circle, var(--disc-a) 0 2px, var(--disc-b) 2px 4px);
+  animation: spin 28s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .disc { animation: none; } }
+
+/* forms */
+label { display: block; font-weight: 700; margin-bottom: 6px; }
+input, select {
+  width: 100%; font: inherit; color: var(--ink); background: var(--card);
+  border: 2px solid var(--line); border-radius: 12px; padding: 12px 14px; min-height: 48px;
+}
+input:focus, select:focus { border-color: var(--cobalt); }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font: 700 1rem 'Figtree', system-ui, sans-serif; min-height: 48px; padding: 12px 24px;
+  border-radius: 999px; border: 2px solid var(--cobalt); background: var(--cobalt); color: var(--on-cobalt);
+  cursor: pointer; text-decoration: none;
+}
+.btn.ghost { background: transparent; color: var(--ink); border-color: var(--ink); }
+.btn.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+.btn.ghost.danger { background: transparent; color: var(--bad); }
+.btn.sm { min-height: 38px; padding: 6px 16px; font-size: .9rem; }
+.btn[disabled] { opacity: .45; cursor: not-allowed; }
+.btn.block { width: 100%; }
+.error { color: var(--bad); font-weight: 700; margin: 10px 0 0; }
+.pill { display: inline-block; padding: 4px 12px; border-radius: 999px; background: var(--ink); color: var(--paper); font-weight: 700; font-size: .85rem; }
+
+/* chips */
+.chips { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.chips li { padding: 6px 14px; border: 2px solid var(--line); border-radius: 999px; background: var(--card); font-weight: 500; }
+
+/* tracklist */
+.tracklist { list-style: none; margin: 20px 0 0; padding: 0; border-top: 3px solid var(--ink); }
+.track { display: grid; grid-template-columns: 52px 1fr; column-gap: 12px; row-gap: 10px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.track .n { font: 800 2.4rem/1 var(--display); color: var(--cobalt); }
+.track.done .n { color: var(--good); }
+.track.mine { background: color-mix(in srgb, var(--sun) 30%, transparent); margin-inline: -10px; padding-inline: 10px; border-radius: 12px; }
+.track.mine .n { color: var(--ink); }
+.listen {
+  display: inline-flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none;
+  border: 2px solid var(--ink); border-radius: 999px; padding: 6px 16px 6px 12px; min-height: 40px;
+}
+.listen::before { content: ''; border-left: 11px solid currentColor; border-top: 7px solid transparent; border-bottom: 7px solid transparent; }
+.listen:hover { background: var(--ink); color: var(--paper); }
+.track .body > * + * { margin-top: 10px; }
+.mine-note { font-weight: 700; }
+
+.submitbar { position: sticky; bottom: 0; z-index: 2; background: var(--paper); border-top: 2px solid var(--ink); padding: 12px 16px 14px; margin: 0 -16px; }
+.progress { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; margin: 8px 0 12px; }
+.progress > span { display: block; height: 100%; background: var(--cobalt); width: 0; transition: width .2s ease; }
+
+/* results */
+.score { font: 800 clamp(4.5rem, 24vw, 7rem)/0.9 var(--display); letter-spacing: -0.04em; margin: 8px 0 4px; }
+.score small { font-size: .4em; color: var(--muted); letter-spacing: 0; }
+.results { list-style: none; padding: 0; margin: 20px 0 0; border-top: 3px solid var(--ink); }
+.res { display: grid; grid-template-columns: 52px 1fr; column-gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.res .n { font: 800 2rem/1 var(--display); }
+.res .verdict { margin: 8px 0 0; padding: 8px 12px; border-radius: 10px; font-weight: 500; }
+.res.good .verdict { background: var(--good-bg); color: var(--good); }
+.res.bad .verdict { background: var(--bad-bg); color: var(--bad); }
+.res.own .verdict { background: color-mix(in srgb, var(--sun) 30%, transparent); }
+.verdict strong { font-weight: 800; }
+
+/* dialog + toast */
+dialog { border: 2px solid var(--ink); border-radius: 20px; background: var(--card); color: var(--ink); padding: 22px; max-width: min(420px, 92vw); }
+dialog::backdrop { background: rgba(10, 10, 30, .55); }
+dialog h2 { font-size: 1.35rem; margin-bottom: 8px; }
+dialog .row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 12px 18px; border-radius: 12px; font-weight: 700; z-index: 20; max-width: 90vw; }
+
+/* host */
+.panel { background: var(--card); border: 2px solid var(--line); border-radius: 18px; padding: 18px; }
+.statusbar { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: center; justify-content: space-between; }
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.tabs { display: flex; gap: 6px; margin: 22px 0 14px; border-bottom: 2px solid var(--line); }
+.tab { background: none; border: 0; font: 700 1rem 'Figtree', sans-serif; padding: 10px 16px; color: var(--muted); border-bottom: 4px solid transparent; margin-bottom: -2px; cursor: pointer; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--cobalt); }
+.entry-list { list-style: none; padding: 0; margin: 16px 0 0; }
+.entry { display: grid; grid-template-columns: 1fr auto; gap: 8px 12px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); }
+.entry .who { font-weight: 700; }
+.entry .link { display: block; font-size: .9rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46ch; }
+.entry form { grid-column: 1 / -1; display: grid; gap: 10px; }
+.grid2 { display: grid; gap: 10px; }
+@media (min-width: 640px) { .grid2 { grid-template-columns: 1fr 2fr auto; align-items: end; } }
+.scroll { overflow-x: auto; border: 2px solid var(--line); border-radius: 14px; background: var(--card); }
+table.matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-size: .95rem; }
+.matrix th, .matrix td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.matrix thead th { font-weight: 700; vertical-align: bottom; }
+.matrix thead th small { display: block; font-weight: 500; color: var(--muted); }
+.matrix th:first-child, .matrix td:first-child { position: sticky; left: 0; background: var(--card); z-index: 1; border-right: 1px solid var(--line); font-weight: 700; }
+.matrix tr:last-child td { border-bottom: 0; }
+.matrix td.good { background: var(--good-bg); color: var(--good); font-weight: 700; }
+.matrix td.bad { background: var(--bad-bg); color: var(--bad); font-weight: 700; }
+.matrix td.na { color: var(--muted); text-align: center; }
+.matrix tr.waiting td { color: var(--muted); }
+details.danger { margin-top: 28px; }
+details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+</style>
+</head>
+<body>
+<main id="app" class="wrap" aria-live="polite"></main>
+<div id="toast" role="status" hidden></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const app = document.getElementById('app');
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
+
+  /* ---------- helpers ---------- */
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const safeUrl = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : '#'; } catch { return '#'; } };
+  const PLATFORM = { spotify: 'Spotify', youtube: 'YouTube' };
+  const nk = (s) => String(s ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+  const local = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
+    del(k) { try { localStorage.removeItem(k); } catch { /* ignore */ } },
+  };
+  const session = {
+    get(k) { try { return sessionStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { sessionStorage.setItem(k, v); } catch { /* ignore */ } },
+    del(k) { try { sessionStorage.removeItem(k); } catch { /* ignore */ } },
+  };
+
+  let adminCode = session.get('wpt-admin') || '';
+
+  async function api(path, { method = 'GET', body, admin = false } = {}) {
+    const headers = { 'content-type': 'application/json' };
+    if (admin) headers['x-admin-code'] = adminCode;
+    let res;
+    try {
+      res = await fetch('/api' + path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    } catch {
+      throw Object.assign(new Error('Can’t reach the game. Check your connection and try again.'), { status: 0 });
+    }
+    let data = null;
+    try { data = await res.json(); } catch { /* no body */ }
+    if (!res.ok) throw Object.assign(new Error(data?.error || 'Something went wrong. Try again.'), { status: res.status });
+    return data;
+  }
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 4200);
+  }
+
+  let pollTimer = null;
+  function stopPoll() { clearInterval(pollTimer); pollTimer = null; }
+  function startPoll(fn, ms) {
+    stopPoll();
+    pollTimer = setInterval(() => { if (!document.hidden) fn().catch(() => {}); }, ms);
+  }
+
+  function setView(html, { wide = false, title = 'Who picked this?' } = {}) {
+    app.className = 'wrap' + (wide ? ' wide' : '');
+    app.onclick = null;
+    app.onsubmit = null;
+    app.onchange = null;
+    app.innerHTML = html;
+    document.title = title;
+    window.scrollTo(0, 0);
+  }
+
+  function askConfirm({ title, body, ok = 'Confirm', danger = false }) {
+    return new Promise((resolve) => {
+      const dlg = document.createElement('dialog');
+      dlg.innerHTML = `<form method="dialog"><h2>${esc(title)}</h2><p>${esc(body)}</p>
+        <div class="row"><button class="btn ghost" value="no">Cancel</button>
+        <button class="btn ${danger ? 'danger' : ''}" value="yes">${esc(ok)}</button></div></form>`;
+      dlg.addEventListener('close', () => { resolve(dlg.returnValue === 'yes'); dlg.remove(); });
+      document.body.appendChild(dlg);
+      dlg.showModal();
+    });
+  }
+
+  function setBusy(btn, busy, label) {
+    if (!btn) return;
+    if (busy) { btn.dataset.label = btn.textContent; btn.textContent = label || 'Working…'; btn.disabled = true; }
+    else { btn.textContent = btn.dataset.label || btn.textContent; btn.disabled = false; }
+  }
+
+  const showError = (msg) => { const e = $('#error'); if (e) e.textContent = msg; else toast(msg); };
+
+  const topbar = (name) => `
+    <div class="bar">
+      <a class="brand" href="#" data-action="home">Who picked this?</a>
+      ${name ? `<span class="small muted">Playing as <strong>${esc(name)}</strong> · <button class="linkbtn" data-action="home">Switch</button></span>` : ''}
+    </div>`;
+
+  /* ---------- routing ---------- */
+  function route() {
+    stopPoll();
+    if (location.hash === '#admin') renderAdmin();
+    else renderHome();
+  }
+  window.addEventListener('hashchange', route);
+
+  /* ---------- player: home ---------- */
+  const STATUS_TEXT = { setup: 'Collecting songs', live: 'Quiz is live', finished: 'Results are in' };
+
+  function renderHome() {
+    const saved = local.get('wpt-name') || '';
+    setView(`
+      <section class="hero">
+        <div class="disc" aria-hidden="true"></div>
+        <h1>Who picked this song?</h1>
+        <p>Everyone secretly chose one track. Listen to the lot, then match each song to the person who picked it.</p>
+      </section>
+      <form id="name-form" class="stack" style="margin-top:22px" autocomplete="off">
+        <div>
+          <label for="name">Your name</label>
+          <input id="name" name="name" maxlength="30" required value="${esc(saved)}" autocapitalize="words">
+        </div>
+        <button class="btn block" type="submit">Continue</button>
+        <p id="error" class="error" role="alert"></p>
+      </form>
+      <p class="small muted" style="margin-top:20px"><span class="pill" id="pill" hidden></span></p>
+      <p class="small" style="margin-top:36px"><a class="muted" href="#admin">Host login</a></p>
+    `);
+    app.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = $('button[type=submit]');
+      setBusy(btn, true, 'Checking…');
+      try { await enterAs($('#name').value); }
+      catch (err) { setBusy(btn, false); showError(err.message); }
+    };
+    api('/status').then((s) => {
+      const pill = $('#pill');
+      if (pill) { pill.textContent = STATUS_TEXT[s.status] || ''; pill.hidden = false; }
+    }).catch(() => {});
+  }
+
+  async function enterAs(name) {
+    const d = await api('/login', { method: 'POST', body: { name } });
+    local.set('wpt-name', d.name);
+    show(d);
+  }
+
+  let current = null; // last login payload
+
+  function show(d) {
+    stopPoll();
+    current = d;
+    if (d.status === 'setup') renderSetup(d);
+    else if (d.status === 'live') (d.submitted ? renderWaiting(d) : renderQuiz(d));
+    else renderFinished(d);
+    const sig = (x) => [x.status, x.submitted, x.registered].join('|');
+    startPoll(async () => {
+      const next = await api('/login', { method: 'POST', body: { name: d.name } });
+      if (sig(next) !== sig(current)) show(next);
+      else if (next.status === 'setup') { current = next; updateChips(next.players); }
+    }, 5000);
+  }
+
+  function goHome() { stopPoll(); current = null; if (location.hash) location.hash = ''; else renderHome(); }
+
+  /* ---------- player: setup ---------- */
+  const chipsHtml = (players) => players.length
+    ? players.map((p) => `<li>${esc(p)}</li>`).join('')
+    : '<li class="muted">Nobody yet</li>';
+  function updateChips(players) { const el = $('#chips'); if (el) el.innerHTML = chipsHtml(players); }
+
+  function renderSetup(d) {
+    setView(`
+      ${topbar(d.name)}
+      <div class="stack">
+        <h2>${d.registered ? `You’re in, ${esc(d.name)}` : `Hi ${esc(d.name)}, add your song`}</h2>
+        ${d.registered
+          ? `<p>Your song: <a href="${esc(safeUrl(d.url))}" target="_blank" rel="noopener noreferrer">${esc(d.url)}</a></p>`
+          : '<p class="muted">Pick a song the others might not guess is yours, then paste its Spotify or YouTube link.</p>'}
+        <form id="song-form" class="stack" autocomplete="off">
+          <div>
+            <label for="url">${d.registered ? 'Change your song' : 'Spotify or YouTube link'}</label>
+            <input id="url" type="url" inputmode="url" required placeholder="https://open.spotify.com/track/…" autocapitalize="none">
+          </div>
+          <button class="btn block" type="submit">${d.registered ? 'Update my song' : 'Save my song'}</button>
+          <p id="error" class="error" role="alert"></p>
+        </form>
+        <div>
+          <h3>Who’s in so far</h3>
+          <ul class="chips" id="chips">${chipsHtml(d.players)}</ul>
+        </div>
+        <p class="small muted">The host starts the quiz once everyone is in. This page updates by itself.</p>
+      </div>
+    `, { title: 'Add your song' });
+    wireHome();
+    app.onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = $('button[type=submit]');
+      setBusy(btn, true, 'Saving…');
+      try {
+        await api('/join', { method: 'POST', body: { name: d.name, url: $('#url').value } });
+        await enterAs(d.name);
+        toast('Song saved');
+      } catch (err) { setBusy(btn, false); showError(err.message); }
+    };
+  }
+
+  function wireHome() {
+    app.onclick = (e) => {
+      if (e.target.closest('[data-action="home"]')) { e.preventDefault(); goHome(); }
+    };
+  }
+
+  /* ---------- player: quiz ---------- */
+  function renderQuiz(d) {
+    const draftKey = 'wpt-draft:' + nk(d.name);
+    const validNames = new Set(d.players);
+    const validIds = new Set(d.songs.map((s) => s.id));
+    let draft = {};
+    try {
+      const raw = JSON.parse(local.get(draftKey) || '{}');
+      for (const [id, nm] of Object.entries(raw)) if (validIds.has(id) && validNames.has(nm)) draft[id] = nm;
+    } catch { draft = {}; }
+    const needed = d.songs.length - 1;
+
+    const rows = d.songs.map((s) => {
+      const mine = s.id === d.mySongId;
+      const listen = `<a class="listen" href="${esc(safeUrl(s.url))}" target="_blank" rel="noopener noreferrer">Listen on ${PLATFORM[s.platform] || 'the web'}</a>`;
+      if (mine) {
+        return `<li class="track mine"><span class="n">${s.n}</span><div class="body">${listen}<p class="mine-note">You picked this one. Skip it.</p></div></li>`;
+      }
+      const opts = d.players.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+      return `<li class="track" data-id="${esc(s.id)}"><span class="n">${s.n}</span><div class="body">${listen}
+        <div><label for="sel-${esc(s.id)}" class="small">Who picked track ${s.n}?</label>
+        <select id="sel-${esc(s.id)}" data-song="${esc(s.id)}"><option value="">Choose a person</option>${opts}</select></div></div></li>`;
+    }).join('');
+
+    setView(`
+      ${topbar(d.name)}
+      <h2>Match every song</h2>
+      <p class="muted" style="margin-top:8px">Tap Listen to hear a track, then choose who picked it. Each person matches one song, and your own is already done.</p>
+      <ol class="tracklist">${rows}</ol>
+      <div class="submitbar">
+        <div class="small"><strong id="count">0</strong> of ${needed} matched</div>
+        <div class="progress" aria-hidden="true"><span id="bar"></span></div>
+        <button id="submit" class="btn block" disabled>Lock in my answers</button>
+        <p id="error" class="error" role="alert"></p>
+      </div>
+    `, { title: 'Match the songs', wide: false });
+    wireHome();
+
+    const songNo = Object.fromEntries(d.songs.map((s) => [s.id, s.n]));
+    function refresh() {
+      $$('select[data-song]').forEach((sel) => {
+        const id = sel.dataset.song;
+        $$('option', sel).forEach((o) => {
+          if (!o.value) return;
+          const usedOn = Object.entries(draft).find(([sid, nm]) => nm === o.value && sid !== id);
+          o.textContent = usedOn ? `${o.value} (on track ${songNo[usedOn[0]]})` : o.value;
+        });
+        sel.value = draft[id] || '';
+        sel.closest('.track').classList.toggle('done', !!draft[id]);
+      });
+      const n = Object.keys(draft).length;
+      $('#count').textContent = n;
+      $('#bar').style.width = (needed ? (n / needed) * 100 : 0) + '%';
+      $('#submit').disabled = n < needed;
+    }
+    app.onchange = (e) => {
+      const sel = e.target.closest('select[data-song]');
+      if (!sel) return;
+      const id = sel.dataset.song;
+      if (sel.value) {
+        for (const other of Object.keys(draft)) if (draft[other] === sel.value) delete draft[other];
+        draft[id] = sel.value;
+      } else delete draft[id];
+      local.set(draftKey, JSON.stringify(draft));
+      refresh();
+    };
+    $('#submit').addEventListener('click', async () => {
+      const ok = await askConfirm({
+        title: 'Lock in your answers?',
+        body: 'You can’t change them after this. Results show up when the host ends the game.',
+        ok: 'Lock them in',
+      });
+      if (!ok) return;
+      const btn = $('#submit');
+      setBusy(btn, true, 'Submitting…');
+      try {
+        await api('/submit', { method: 'POST', body: { name: d.name, guesses: draft } });
+        local.del(draftKey);
+        app.onchange = null;
+        await enterAs(d.name);
+      } catch (err) { setBusy(btn, false); showError(err.message); }
+    });
+    refresh();
+  }
+
+  /* ---------- player: waiting + results ---------- */
+  function renderWaiting(d) {
+    setView(`
+      ${topbar(d.name)}
+      <div class="stack">
+        <h2>Answers locked in</h2>
+        <p>Nice one, ${esc(d.name)}. Your score and the right answers appear here once the host ends the game.</p>
+        <p class="small muted">Keep this page open. It updates by itself.</p>
+      </div>
+    `, { title: 'Answers locked in' });
+    wireHome();
+  }
+
+  function renderFinished(d) {
+    if (!d.submitted) {
+      setView(`
+        ${topbar(d.name)}
+        <div class="stack">
+          <h2>The game has ended</h2>
+          <p>You didn’t lock in answers this round, so there’s no score to show. Ask the host about the next game.</p>
+        </div>
+      `, { title: 'Game over' });
+      wireHome();
+      return;
+    }
+    const line = d.score === d.total ? 'Every single one. Suspiciously good.'
+      : d.score === 0 ? 'Not one. Your friends are mysterious.'
+      : d.score >= d.total / 2 ? 'Solid ear for your friends’ taste.'
+      : 'Room to get to know your friends better.';
+    const rows = d.review.map((r) => {
+      const listen = `<a class="listen" href="${esc(safeUrl(r.url))}" target="_blank" rel="noopener noreferrer">Listen on ${PLATFORM[r.platform] || 'the web'}</a>`;
+      let cls, verdict;
+      if (r.own) { cls = 'own'; verdict = '<strong>Yours.</strong> You picked this one.'; }
+      else if (r.correct) { cls = 'good'; verdict = `<strong>Right.</strong> ${esc(r.answer)} picked it.`; }
+      else { cls = 'bad'; verdict = `<strong>Not quite.</strong> You said ${esc(r.guess)}. It was ${esc(r.answer)}.`; }
+      return `<li class="res ${cls}"><span class="n">${r.n}</span><div>${listen}<p class="verdict">${verdict}</p></div></li>`;
+    }).join('');
+    setView(`
+      ${topbar(d.name)}
+      <h2>Your score</h2>
+      <div class="score">${d.score}<small> / ${d.total}</small></div>
+      <p>${esc(line)}</p>
+      <ol class="results">${rows}</ol>
+    `, { title: `You scored ${d.score}/${d.total}` });
+    wireHome();
+  }
+
+  /* ---------- host ---------- */
+  const admin = { data: null, sig: '', tab: null, editing: null };
+
+  function renderAdminLogin(message = '') {
+    stopPoll();
+    setView(`
+      <div class="bar"><a class="brand" href="#">Who picked this?</a></div>
+      <div class="stack">
+        <h2>Host login</h2>
+        <form id="admin-form" class="stack" autocomplete="off">
+          <div>
+            <label for="code">Host code</label>
+            <input id="code" type="password" required autocomplete="current-password">
+          </div>
+          <button class="btn block" type="submit">Open host view</button>
+          <p id="error" class="error" role="alert">${esc(message)}</p>
+        </form>
+        <p class="small muted">The host code is the ADMIN_CODE you set in Netlify.</p>
+      </div>
+    `, { title: 'Host login' });
+    app.onsubmit = async (e) => {
+      e.preventDefault();
+      adminCode = $('#code').value;
+      session.set('wpt-admin', adminCode);
+      await renderAdmin();
+    };
+  }
+
+  async function renderAdmin() {
+    stopPoll();
+    if (!adminCode) return renderAdminLogin();
+    try {
+      await refreshAdmin(true);
+    } catch (err) {
+      if (err.status === 401 || err.status === 500) {
+        adminCode = ''; session.del('wpt-admin');
+        return renderAdminLogin(err.message);
+      }
+      setView(`<div class="bar"><a class="brand" href="#">Who picked this?</a></div><p class="error">${esc(err.message)}</p>`);
+      return;
+    }
+    startPoll(() => refreshAdmin(false), 5000);
+  }
+
+  const isTyping = () => {
+    const a = document.activeElement;
+    return a && app.contains(a) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName);
+  };
+
+  async function refreshAdmin(force) {
+    const d = await api('/admin/overview', { admin: true });
+    const sig = JSON.stringify(d);
+    if (!force && sig === admin.sig) return;
+    if (!force && isTyping()) { admin.data = d; return; }
+    admin.sig = sig;
+    admin.data = d;
+    if (!admin.tab) admin.tab = d.status === 'setup' ? 'players' : 'picks';
+    drawAdmin();
+  }
+
+  const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+
+  function drawAdmin() {
+    const scrollY = window.scrollY;
+    const d = admin.data;
+    const { entries, submissions, status } = d;
+    const subCount = submissions.length;
+    const statusLabel = { setup: 'Collecting songs', live: 'Quiz is live', finished: 'Results are in' }[status];
+
+    let actions = '';
+    if (status === 'setup') {
+      const enough = entries.length >= d.minPlayers;
+      actions = `<button class="btn" data-action="status" data-status="live" ${enough ? '' : 'disabled'}>Start quiz</button>`;
+    } else if (status === 'live') {
+      actions = `<button class="btn" data-action="status" data-status="finished">End game and show results</button>
+                 <button class="btn ghost" data-action="status" data-status="setup">Back to setup</button>`;
+    } else {
+      actions = `<button class="btn" data-action="status" data-status="live">Reopen quiz</button>
+                 <button class="btn ghost" data-action="status" data-status="setup">Back to setup</button>`;
+    }
+    const hint = status === 'setup'
+      ? (entries.length >= d.minPlayers ? `${entries.length} players ready.` : `Add at least ${d.minPlayers} players to start (${entries.length} so far).`)
+      : status === 'live' ? `${subCount} of ${entries.length} players have submitted.`
+      : `${subCount} of ${entries.length} players submitted. Everyone can now see their own results.`;
+
+    setView(`
+      <div class="bar">
+        <a class="brand" href="#">Who picked this?</a>
+        <span class="small"><button class="linkbtn" data-action="copy">Copy player link</button> · <button class="linkbtn" data-action="signout">Sign out</button></span>
+      </div>
+      <section class="panel statusbar">
+        <div><span class="pill">${statusLabel}</span><p class="small muted" style="margin:8px 0 0">${esc(hint)}</p></div>
+        <div class="actions">${actions}</div>
+      </section>
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" data-action="tab" data-tab="players" aria-selected="${admin.tab === 'players'}">Players and songs</button>
+        <button class="tab" role="tab" data-action="tab" data-tab="picks" aria-selected="${admin.tab === 'picks'}">Selections</button>
+      </div>
+      <div id="tabbody">${admin.tab === 'players' ? playersTab(d) : picksTab(d)}</div>
+      <details class="danger"><summary>Danger zone</summary>
+        <p class="small muted" style="margin-top:10px">Removes every player, song and answer and returns to song collection.</p>
+        <button class="btn ghost danger sm" data-action="new-game">Start a new game</button>
+      </details>
+      <p id="error" class="error" role="alert"></p>
+    `, { wide: true, title: 'Host view' });
+    app.onclick = adminClick;
+    app.onsubmit = adminSubmit;
+    window.scrollTo(0, scrollY);
+  }
+
+  function playersTab(d) {
+    const setup = d.status === 'setup';
+    const list = [...d.entries].sort(byName);
+    const add = setup ? `
+      <form class="panel grid2" data-form="entry" autocomplete="off">
+        <div><label for="add-name">Player name</label><input id="add-name" name="name" maxlength="30" required></div>
+        <div><label for="add-url">Spotify or YouTube link</label><input id="add-url" name="url" type="url" inputmode="url" required placeholder="https://…"></div>
+        <button class="btn" type="submit">Add song</button>
+      </form>` : `<p class="muted small">Songs are locked while the quiz runs. Use “Back to setup” to change them (this clears submitted answers).</p>`;
+    const rows = list.map((e) => {
+      if (setup && admin.editing === nk(e.name)) {
+        return `<li class="entry"><form data-form="entry" autocomplete="off">
+          <input type="hidden" name="oldName" value="${esc(e.name)}">
+          <div><label for="edit-name">Player name</label><input id="edit-name" name="name" maxlength="30" required value="${esc(e.name)}"></div>
+          <div><label for="edit-url">Spotify or YouTube link</label><input id="edit-url" name="url" type="url" required value="${esc(e.url)}"></div>
+          <div class="actions"><button class="btn sm" type="submit">Save</button>
+          <button class="btn ghost sm" type="button" data-action="cancel-edit">Cancel</button></div></form></li>`;
+      }
+      const controls = setup
+        ? `<div class="actions"><button class="btn ghost sm" data-action="edit" data-name="${esc(e.name)}">Edit</button>
+           <button class="btn ghost danger sm" data-action="delete" data-name="${esc(e.name)}">Remove</button></div>`
+        : `<span class="small muted">Track ${e.n}</span>`;
+      return `<li class="entry"><div><span class="who">${esc(e.name)}</span>
+        <a class="link" href="${esc(safeUrl(e.url))}" target="_blank" rel="noopener noreferrer">${PLATFORM[e.platform] || ''}: ${esc(e.url)}</a></div>${controls}</li>`;
+    }).join('');
+    return `<div class="stack">${add}<ul class="entry-list">${rows || '<li class="muted">No players yet. Add one above, or share the player link so people can add their own songs.</li>'}</ul></div>`;
+  }
+
+  function picksTab(d) {
+    if (!d.entries.length) return '<p class="muted">No players yet.</p>';
+    const tracks = [...d.entries].sort((a, b) => a.n - b.n);
+    const players = [...d.entries].sort(byName);
+    const head = tracks.map((t) => `<th>Track ${t.n}<small>${esc(t.name)}</small></th>`).join('');
+    const body = players.map((p) => {
+      const sub = d.submissions.find((s) => nk(s.name) === nk(p.name));
+      const cells = tracks.map((t) => {
+        if (nk(t.name) === nk(p.name)) return '<td class="na">Own</td>';
+        if (!sub) return '<td></td>';
+        const g = sub.guesses[t.id];
+        const right = g && nk(g) === nk(t.name);
+        return `<td class="${right ? 'good' : 'bad'}">${esc(g || '')}${right ? ' ✓' : ' ✗'}</td>`;
+      }).join('');
+      const score = sub ? `${sub.score}/${sub.total}` : 'Waiting';
+      const reset = sub && d.status === 'live'
+        ? `<button class="btn ghost sm" data-action="reset-guess" data-name="${esc(p.name)}">Reset</button>` : '';
+      return `<tr class="${sub ? '' : 'waiting'}"><td>${esc(p.name)}</td><td>${score}</td>${cells}<td>${reset}</td></tr>`;
+    }).join('');
+    return `<div class="stack">
+      <p class="small muted">Green means right, red means wrong. Track headers show who really picked each song.</p>
+      <div class="scroll"><table class="matrix"><thead><tr><th>Player</th><th>Score</th>${head}<th></th></tr></thead><tbody>${body}</tbody></table></div>
+    </div>`;
+  }
+
+  async function mutate(fn, okMsg) {
+    try {
+      await fn();
+      await refreshAdmin(true);
+      if (okMsg) toast(okMsg);
+    } catch (err) {
+      if (err.status === 401) { adminCode = ''; session.del('wpt-admin'); return renderAdminLogin(err.message); }
+      toast(err.message);
+    }
+  }
+
+  async function adminClick(e) {
+    const el = e.target.closest('[data-action]');
+    if (!el) return;
+    const act = el.dataset.action;
+    const name = el.dataset.name;
+    if (act === 'tab') { admin.tab = el.dataset.tab; admin.editing = null; drawAdmin(); }
+    else if (act === 'edit') { admin.editing = nk(name); drawAdmin(); const i = $('#edit-name'); if (i) i.focus(); }
+    else if (act === 'cancel-edit') { admin.editing = null; drawAdmin(); }
+    else if (act === 'signout') { adminCode = ''; session.del('wpt-admin'); stopPoll(); renderAdminLogin(); }
+    else if (act === 'copy') {
+      const link = location.origin + location.pathname;
+      try { await navigator.clipboard.writeText(link); toast('Player link copied'); }
+      catch { window.prompt('Copy this player link:', link); }
+    }
+    else if (act === 'delete') {
+      if (await askConfirm({ title: `Remove ${name}?`, body: 'Their song is removed from the game.', ok: 'Remove', danger: true })) {
+        mutate(() => api('/admin/entry/delete', { method: 'POST', admin: true, body: { name } }), 'Removed');
+      }
+    }
+    else if (act === 'reset-guess') {
+      if (await askConfirm({ title: `Reset ${name}’s answers?`, body: 'They can submit again while the quiz is live.', ok: 'Reset', danger: true })) {
+        mutate(() => api('/admin/reset-guess', { method: 'POST', admin: true, body: { name } }), 'Answers reset');
+      }
+    }
+    else if (act === 'status') {
+      const next = el.dataset.status;
+      const d = admin.data;
+      if (next === 'finished') {
+        const missing = d.entries.length - d.submissions.length;
+        const ok = await askConfirm({
+          title: 'End the game?',
+          body: missing > 0 ? `${missing} player${missing === 1 ? '' : 's'} haven’t submitted yet. They’ll see no score. Everyone else sees their results right away.` : 'Everyone will see their results right away.',
+          ok: 'End game and show results',
+        });
+        if (!ok) return;
+      } else if (next === 'setup') {
+        const ok = await askConfirm({ title: 'Back to setup?', body: 'This clears all submitted answers. Players and songs stay.', ok: 'Back to setup', danger: true });
+        if (!ok) return;
+      }
+      mutate(() => api('/admin/status', { method: 'POST', admin: true, body: { status: next } }).then(() => { admin.tab = next === 'setup' ? 'players' : 'picks'; }));
+    }
+    else if (act === 'new-game') {
+      if (await askConfirm({ title: 'Start a new game?', body: 'This deletes every player, song and answer. It can’t be undone.', ok: 'Delete everything', danger: true })) {
+        mutate(() => api('/admin/new-game', { method: 'POST', admin: true, body: {} }).then(() => { admin.tab = 'players'; admin.editing = null; }), 'Fresh game ready');
+      }
+    }
+  }
+
+  function adminSubmit(e) {
+    const form = e.target.closest('form[data-form="entry"]');
+    if (!form) return;
+    e.preventDefault();
+    const fd = new FormData(form);
+    const body = { name: fd.get('name'), url: fd.get('url') };
+    if (fd.get('oldName')) body.oldName = fd.get('oldName');
+    mutate(() => api('/admin/entry', { method: 'POST', admin: true, body }).then(() => { admin.editing = null; }), body.oldName ? 'Saved' : 'Song added');
+  }
+
+  /* ---------- start ---------- */
+  route();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "who-picked-this",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A party quiz: match each song to the player who picked it.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "dev": "netlify dev"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^11.1.1"
+  }
+}
