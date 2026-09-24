@@ -5,6 +5,7 @@
 // Data layout:
 //   meta                -> { status: 'setup' | 'live' | 'finished' }
 //   entries/<nameKey>   -> { name, url, platform, title, artist, image, songId, createdAt }
+//                          (url/platform/title/artist/image are null until a song link is set)
 //   guesses/<nameKey>   -> { name, guesses: { [songId]: playerName }, submittedAt }
 
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
@@ -55,6 +56,13 @@ export function parseSongUrl(raw) {
   u.username = '';
   u.password = '';
   return { url: u.href, platform };
+}
+
+// Only the host can leave a song link out entirely (a placeholder player who
+// hasn't picked a song yet); a blank link is otherwise still an error.
+function parseOptionalSongUrl(raw) {
+  if (!String(raw ?? '').trim()) return { url: null, platform: null };
+  return parseSongUrl(raw);
 }
 
 // ---------- storage helpers ----------
@@ -244,7 +252,7 @@ async function adminSaveEntry(store, body, fetchMeta) {
   const meta = await getMeta(store);
   if (meta.status !== 'setup') throw new HttpError(409, 'אפשר לערוך שירים רק לפני תחילת החידון.');
   const name = cleanName(body?.name);
-  const { url, platform } = parseSongUrl(body?.url);
+  const { url, platform } = parseOptionalSongUrl(body?.url);
   const entries = await loadEntries(store);
   const old = body?.oldName ? findEntry(entries, body.oldName) : null;
   if (body?.oldName && !old) throw new HttpError(404, 'השחקן הזה כבר לא קיים.');
@@ -253,7 +261,7 @@ async function adminSaveEntry(store, body, fetchMeta) {
   if (!old && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'המשחק הזה מלא.');
 
   const base = old;
-  const info = base?.url === url && hasMeta(base) ? base : await fetchMeta(url, platform);
+  const info = !url ? null : base?.url === url && hasMeta(base) ? base : await fetchMeta(url, platform);
   if (old && entryKey(old.name) !== entryKey(name)) await store.delete(entryKey(old.name));
   await store.setJSON(entryKey(name), {
     name,
@@ -285,6 +293,9 @@ async function adminSetStatus(store, body) {
     const entries = await loadEntries(store);
     if (entries.length < MIN_PLAYERS) {
       throw new HttpError(400, `הוסיפו לפחות ${MIN_PLAYERS} שחקנים לפני ההתחלה.`);
+    }
+    if (entries.some((e) => !e.url)) {
+      throw new HttpError(400, 'לכל השחקנים צריך להיות שיר לפני שמתחילים. השלימו או הוסיפו קישורים לשחקנים שחסר להם.');
     }
   } else if (next === 'live' && from === 'finished') {
     // reopen: keep submissions
