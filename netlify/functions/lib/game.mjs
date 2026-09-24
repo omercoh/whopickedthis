@@ -4,10 +4,11 @@
 //
 // Data layout:
 //   meta                -> { status: 'setup' | 'live' | 'finished' }
-//   entries/<nameKey>   -> { name, url, platform, songId, createdAt }
+//   entries/<nameKey>   -> { name, url, platform, title, artist, songId, createdAt }
 //   guesses/<nameKey>   -> { name, guesses: { [songId]: playerName }, submittedAt }
 
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { fetchSongMeta } from './metadata.mjs';
 
 export class HttpError extends Error {
   constructor(status, message) {
@@ -77,7 +78,14 @@ async function loadEntries(store) {
 }
 
 const findEntry = (entries, name) => entries.find((e) => nameKey(e.name) === nameKey(name));
-const publicSong = (e) => ({ id: e.songId, n: e.n, url: e.url, platform: e.platform });
+const publicSong = (e) => ({
+  id: e.songId,
+  n: e.n,
+  url: e.url,
+  platform: e.platform,
+  title: e.title ?? null,
+  artist: e.artist ?? null,
+});
 
 async function clearGuesses(store) {
   const { blobs } = await store.list({ prefix: 'guesses/' });
@@ -135,7 +143,7 @@ async function login(store, body) {
   return { status: 'finished', name: me.name, submitted: true, score, total, review };
 }
 
-async function join(store, body) {
+async function join(store, body, fetchMeta) {
   const name = cleanName(body?.name);
   const { url, platform } = parseSongUrl(body?.url);
   const meta = await getMeta(store);
@@ -143,10 +151,13 @@ async function join(store, body) {
   const entries = await loadEntries(store);
   const existing = findEntry(entries, name);
   if (!existing && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'המשחק הזה מלא.');
+  const info = existing?.url === url ? existing : await fetchMeta(url, platform);
   await store.setJSON(entryKey(existing?.name ?? name), {
     name: existing?.name ?? name,
     url,
     platform,
+    title: info?.title ?? null,
+    artist: info?.artist ?? null,
     songId: existing?.songId ?? randomBytes(4).toString('hex'),
     createdAt: existing?.createdAt ?? Date.now(),
   });
@@ -209,7 +220,7 @@ async function adminOverview(store) {
   };
 }
 
-async function adminSaveEntry(store, body) {
+async function adminSaveEntry(store, body, fetchMeta) {
   const meta = await getMeta(store);
   if (meta.status !== 'setup') throw new HttpError(409, 'אפשר לערוך שירים רק לפני תחילת החידון.');
   const name = cleanName(body?.name);
@@ -222,11 +233,14 @@ async function adminSaveEntry(store, body) {
   if (!old && entries.length >= MAX_PLAYERS) throw new HttpError(409, 'המשחק הזה מלא.');
 
   const base = old;
+  const info = base?.url === url ? base : await fetchMeta(url, platform);
   if (old && entryKey(old.name) !== entryKey(name)) await store.delete(entryKey(old.name));
   await store.setJSON(entryKey(name), {
     name,
     url,
     platform,
+    title: info?.title ?? null,
+    artist: info?.artist ?? null,
     songId: base?.songId ?? randomBytes(4).toString('hex'),
     createdAt: base?.createdAt ?? Date.now(),
   });
@@ -281,7 +295,7 @@ async function adminNewGame(store) {
 
 // ---------- router ----------
 
-export async function handle({ method, path, body, adminCode, adminSecret }, store) {
+export async function handle({ method, path, body, adminCode, adminSecret, fetchMeta = fetchSongMeta }, store) {
   try {
     const p = path.replace(/^\/api/, '').replace(/\/+$/, '') || '/';
     if (p.startsWith('/admin/')) requireAdmin(adminCode, adminSecret);
@@ -293,10 +307,10 @@ export async function handle({ method, path, body, adminCode, adminSecret }, sto
         return ok({ status: meta.status, count: blobs.length });
       }
       case 'POST /login': return ok(await login(store, body));
-      case 'POST /join': return ok(await join(store, body));
+      case 'POST /join': return ok(await join(store, body, fetchMeta));
       case 'POST /submit': return ok(await submit(store, body));
       case 'GET /admin/overview': return ok(await adminOverview(store));
-      case 'POST /admin/entry': return ok(await adminSaveEntry(store, body));
+      case 'POST /admin/entry': return ok(await adminSaveEntry(store, body, fetchMeta));
       case 'POST /admin/entry/delete': return ok(await adminDeleteEntry(store, body));
       case 'POST /admin/status': return ok(await adminSetStatus(store, body));
       case 'POST /admin/reset-guess': return ok(await adminResetGuess(store, body));
