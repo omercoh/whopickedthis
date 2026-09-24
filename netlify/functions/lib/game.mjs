@@ -109,6 +109,22 @@ function scoreRow(entries, row) {
   return { score, total, review };
 }
 
+async function buildLeaderboard(store, entries) {
+  const rows = await listJson(store, 'guesses/');
+  const byRow = new Map(rows.map((r) => [nameKey(r.name), r]));
+  return entries
+    .map((e) => {
+      const row = byRow.get(nameKey(e.name));
+      if (!row) return { name: e.name, submitted: false, score: null, total: null };
+      const { score, total } = scoreRow(entries, row);
+      return { name: e.name, submitted: true, score, total };
+    })
+    .sort((a, b) => {
+      if (a.submitted !== b.submitted) return a.submitted ? -1 : 1;
+      return a.submitted ? b.score - a.score || byName(a.name, b.name) : byName(a.name, b.name);
+    });
+}
+
 // ---------- player actions ----------
 
 async function login(store, body) {
@@ -138,9 +154,10 @@ async function login(store, body) {
     };
   }
   // finished
-  if (!row) return { status: 'finished', name: me.name, submitted: false };
+  const leaderboard = await buildLeaderboard(store, entries);
+  if (!row) return { status: 'finished', name: me.name, submitted: false, leaderboard };
   const { score, total, review } = scoreRow(entries, row);
-  return { status: 'finished', name: me.name, submitted: true, score, total, review };
+  return { status: 'finished', name: me.name, submitted: true, score, total, review, leaderboard };
 }
 
 async function join(store, body, fetchMeta) {

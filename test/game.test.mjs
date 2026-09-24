@@ -138,12 +138,24 @@ test('full flow: submit, scoring, results only after finish', async () => {
   assert.ok(rAna.review.every((r) => r.own || r.correct === true));
   assert.equal(rAna.review.filter((r) => r.own).length, 1);
 
+  // everyone sees the same full leaderboard, not just their own score
+  const expectedLeaderboard = [
+    { name: 'Ana', submitted: true, score: 3, total: 3 },
+    { name: 'Ben', submitted: true, score: 0, total: 3 },
+    { name: 'Cy', submitted: false, score: null, total: null },
+    { name: 'Dee', submitted: false, score: null, total: null },
+  ];
+  assert.deepEqual(rAna.leaderboard, expectedLeaderboard);
+
   const rBen = (await c.post('/login', { name: 'Ben' })).data;
   assert.equal(rBen.total, 3);
   assert.equal(rBen.score, 0);
   assert.ok(rBen.review.filter((r) => !r.own).every((r) => r.correct === false && r.answer));
+  assert.deepEqual(rBen.leaderboard, expectedLeaderboard);
 
-  assert.deepEqual((await c.post('/login', { name: 'Cy' })).data, { status: 'finished', name: 'Cy', submitted: false });
+  const rCy = (await c.post('/login', { name: 'Cy' })).data;
+  assert.deepEqual(rCy, { status: 'finished', name: 'Cy', submitted: false, leaderboard: expectedLeaderboard });
+
   assert.equal((await c.post('/submit', { name: 'Cy', guesses: {} })).status, 409);
   assert.equal((await c.post('/join', { name: 'Late', url: SP('z') })).status, 409);
 });
