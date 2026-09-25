@@ -190,6 +190,61 @@ table.matrix { border-collapse: separate; border-spacing: 0; width: 100%; font-s
 .matrix tr.waiting td { color: var(--muted); }
 details.danger { margin-top: 28px; }
 details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+
+/* podium */
+.podium-overlay {
+  position: fixed; inset: 0; z-index: 50; direction: ltr; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(circle at 50% 15%, #302F63 0%, #131230 65%);
+  color: #fff; padding: 64px 16px 40px; overflow: hidden;
+}
+.podium-close {
+  position: absolute; top: 16px; inset-inline-end: 16px; z-index: 2;
+  width: 44px; height: 44px; border-radius: 999px; border: 2px solid rgba(255,255,255,.4);
+  background: rgba(255,255,255,.08); color: #fff; font-size: 1.2rem; line-height: 1; cursor: pointer;
+}
+.podium-close:hover { background: rgba(255,255,255,.18); }
+.podium-title { font: 800 1.5rem var(--display); margin: 0 0 34px; text-align: center; }
+.podium-hint { margin-top: 26px; color: rgba(255,255,255,.65); font-weight: 700; text-align: center; }
+.podium-stage { display: flex; align-items: flex-end; justify-content: center; gap: 14px; width: 100%; max-width: 560px; }
+.podium-col { flex: 1; display: flex; flex-direction: column; align-items: center; max-width: 180px; }
+.podium-col[data-place="1"] { order: 2; }
+.podium-col[data-place="2"] { order: 1; }
+.podium-col[data-place="3"] { order: 3; }
+.podium-card {
+  opacity: 0; transform: translateY(16px) scale(.9); transition: opacity .45s ease, transform .45s ease;
+  background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.25); border-radius: 14px;
+  padding: 10px 12px; margin-bottom: 10px; text-align: center; width: 100%;
+}
+.podium-col.revealed .podium-card { opacity: 1; transform: translateY(0) scale(1); }
+.podium-col[data-place="1"].revealed .podium-card { border-color: var(--sun); }
+.podium-crown { display: block; font-size: 1.4rem; line-height: 1.2; }
+.podium-name { display: block; font: 800 1.05rem var(--display); word-break: break-word; }
+.podium-score { display: block; margin-top: 2px; font-weight: 700; color: var(--sun); }
+.podium-block {
+  width: 100%; border-radius: 12px 12px 0 0; display: flex; align-items: center; justify-content: center;
+  font: 800 2rem var(--display); color: #1C1B3A; height: 0; overflow: hidden;
+  transition: height .7s cubic-bezier(.2,.85,.3,1.2);
+}
+.podium-num { opacity: 0; }
+.podium-col.revealed .podium-num { opacity: 1; animation: podium-pop .5s ease; }
+.podium-col[data-place="1"] .podium-block { background: linear-gradient(180deg, #FFE27A, var(--sun)); }
+.podium-col[data-place="2"] .podium-block { background: linear-gradient(180deg, #E7E9F7, #B9BCDE); }
+.podium-col[data-place="3"] .podium-block { background: linear-gradient(180deg, #F0B27A, #C97B3F); }
+.podium-col[data-place="1"].revealed .podium-block { height: 190px; }
+.podium-col[data-place="2"].revealed .podium-block { height: 140px; }
+.podium-col[data-place="3"].revealed .podium-block { height: 100px; }
+@keyframes podium-pop { 0% { transform: scale(.6); } 60% { transform: scale(1.15); } 100% { transform: scale(1); } }
+.confetti-piece { position: absolute; top: -10px; width: 8px; height: 14px; opacity: .9; animation: confetti-fall linear forwards; }
+@keyframes confetti-fall { to { transform: translateY(110vh) rotate(540deg); opacity: 0; } }
+@media (max-width: 420px) {
+  .podium-col[data-place="1"].revealed .podium-block { height: 140px; }
+  .podium-col[data-place="2"].revealed .podium-block { height: 104px; }
+  .podium-col[data-place="3"].revealed .podium-block { height: 76px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .podium-card, .podium-block, .podium-num, .confetti-piece { animation: none !important; transition: none !important; }
+}
 </style>
 </head>
 <body>
@@ -298,6 +353,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
   /* ---------- routing ---------- */
   function route() {
     stopPoll();
+    closePodium();
     if (location.hash === '#admin') renderAdmin();
     else renderHome();
   }
@@ -647,7 +703,8 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
       actions = `<button class="btn" data-action="status" data-status="finished">סיום המשחק והצגת תוצאות</button>
                  <button class="btn ghost" data-action="status" data-status="setup">איפוס משחק</button>`;
     } else {
-      actions = `<button class="btn" data-action="status" data-status="live">פתיחה מחדש של החידון</button>
+      const podiumBtn = subCount > 0 ? '<button class="btn" data-action="show-podium">🏆 הצגת פודיום</button> ' : '';
+      actions = `${podiumBtn}<button class="btn ghost" data-action="status" data-status="live">פתיחה מחדש של החידון</button>
                  <button class="btn ghost" data-action="status" data-status="setup">איפוס משחק</button>`;
     }
     const hint = status === 'setup'
@@ -748,6 +805,88 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     }
   }
 
+  /* ---------- host: podium reveal ---------- */
+  let podiumEl = null;
+  let podiumStep = 0;
+  let podiumTotal = 0;
+
+  function topScores(d) {
+    return [...d.submissions].sort((a, b) => b.score - a.score || byName(a, b)).slice(0, 3);
+  }
+
+  function showPodium(d) {
+    const top = topScores(d);
+    if (!top.length) return;
+    closePodium();
+    podiumStep = 0;
+    podiumTotal = top.length;
+    const cols = top.map((row, i) => {
+      const place = i + 1;
+      return `<div class="podium-col" data-place="${place}">
+        <div class="podium-card">
+          <span class="podium-crown">${place === 1 ? '👑' : ''}</span>
+          <span class="podium-name">${esc(row.name)}</span>
+          <span class="podium-score">${row.score} / ${row.total}</span>
+        </div>
+        <div class="podium-block"><span class="podium-num">${place}</span></div>
+      </div>`;
+    }).join('');
+    const el = document.createElement('div');
+    el.className = 'podium-overlay';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-label', 'פודיום התוצאות');
+    el.innerHTML = `
+      <button class="podium-close" type="button" aria-label="סגירה">✕</button>
+      <h2 class="podium-title">🏆 מקומות הבית</h2>
+      <div class="podium-stage">${cols}</div>
+      <p class="podium-hint">הקישו בכל מקום כדי להמשיך</p>
+    `;
+    document.body.appendChild(el);
+    document.body.style.overflow = 'hidden';
+    podiumEl = el;
+    $('.podium-close', el).addEventListener('click', (e) => { e.stopPropagation(); closePodium(); });
+    el.addEventListener('click', () => advancePodium());
+    document.addEventListener('keydown', podiumKeydown);
+  }
+
+  function podiumKeydown(e) {
+    if (e.key === 'Escape') closePodium();
+  }
+
+  function advancePodium() {
+    if (!podiumEl) return;
+    if (podiumStep >= podiumTotal) { closePodium(); return; }
+    podiumStep += 1;
+    const place = podiumTotal - podiumStep + 1; // reveal 3rd, then 2nd, then 1st
+    const col = podiumEl.querySelector(`.podium-col[data-place="${place}"]`);
+    col?.classList.add('revealed');
+    if (place === 1) burstConfetti(podiumEl);
+    const hint = $('.podium-hint', podiumEl);
+    if (hint) hint.textContent = podiumStep >= podiumTotal ? 'הקישו כדי לסגור' : 'הקישו בכל מקום כדי להמשיך';
+  }
+
+  function burstConfetti(el) {
+    const colors = ['#FFD23F', '#3B3AF0', '#0B7F57', '#C81F47', '#FFFFFF'];
+    for (let i = 0; i < 60; i++) {
+      const piece = document.createElement('span');
+      piece.className = 'confetti-piece';
+      piece.style.left = Math.random() * 100 + '%';
+      piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+      piece.style.animationDuration = (2.2 + Math.random() * 1.6) + 's';
+      piece.style.animationDelay = (Math.random() * .4) + 's';
+      el.appendChild(piece);
+      piece.addEventListener('animationend', () => piece.remove());
+    }
+  }
+
+  function closePodium() {
+    document.removeEventListener('keydown', podiumKeydown);
+    document.body.style.overflow = '';
+    podiumEl?.remove();
+    podiumEl = null;
+  }
+
   async function adminClick(e) {
     const el = e.target.closest('[data-action]');
     if (!el) return;
@@ -789,6 +928,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
       }
       mutate(() => api('/admin/status', { method: 'POST', admin: true, body: { status: next } }).then(() => { admin.tab = next === 'setup' ? 'players' : 'picks'; }));
     }
+    else if (act === 'show-podium') { showPodium(admin.data); }
     else if (act === 'new-game') {
       if (await askConfirm({ title: 'להתחיל משחק חדש?', body: 'זה מוחק את כל השחקנים, השירים והתשובות. אי אפשר לבטל את זה.', ok: 'מחיקת הכול', danger: true })) {
         mutate(() => api('/admin/new-game', { method: 'POST', admin: true, body: {} }).then(() => { admin.tab = 'players'; admin.editing = null; }), 'משחק חדש מוכן');
