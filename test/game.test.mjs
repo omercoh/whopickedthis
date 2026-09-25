@@ -101,6 +101,16 @@ test('names are unique case-insensitively; rejoining updates the song', async ()
   assert.match(o.data.entries[0].url, /track\/2/);
 });
 
+test('invisible bidi marks in a name (common on foreign-locale keyboards) do not block login', async () => {
+  const c = client(memoryStore());
+  await c.admin('POST', '/entry', { name: 'אודי', url: SP('1') });
+  // A phone with a non-Hebrew locale can silently insert a right-to-left
+  // mark while typing; the name still looks identical on screen.
+  const login = await c.post('/login', { name: 'אודי‏' });
+  assert.equal(login.status, 200);
+  assert.equal(login.data.name, 'אודי');
+});
+
 test('admin routes need the host code', async () => {
   const c = client(memoryStore());
   assert.equal((await c.call('GET', '/admin/overview', null, 'wrong')).status, 401);

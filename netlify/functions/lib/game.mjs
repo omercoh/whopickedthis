@@ -22,7 +22,13 @@ export const MIN_PLAYERS = 3;
 const MAX_PLAYERS = 60;
 const MAX_NAME = 30;
 
-export const normName = (s) => String(s ?? '').trim().replace(/\s+/g, ' ');
+// Strip invisible bidi/formatting marks (e.g. U+200F RIGHT-TO-LEFT MARK) that
+// mobile keyboards silently insert into RTL text, especially on devices set
+// to a non-Hebrew region/locale. Left in place, two visually identical names
+// would hash to different keys and the player would look "not registered".
+const INVISIBLE_MARKS = /[​-‏‪-‮⁠-⁩﻿]/g;
+export const normName = (s) =>
+  String(s ?? '').normalize('NFC').replace(INVISIBLE_MARKS, '').trim().replace(/\s+/g, ' ');
 export const nameKey = (s) => normName(s).toLowerCase();
 const entryKey = (name) => 'entries/' + encodeURIComponent(nameKey(name));
 const guessKey = (name) => 'guesses/' + encodeURIComponent(nameKey(name));
