@@ -12,16 +12,19 @@ export default async (req) => {
     }
   }
   const store = getStore({ name: 'quiz', consistency: 'strong' });
-  const { status, data } = await handle(
+  const { status, data, redirect } = await handle(
     {
       method: req.method,
       path: url.pathname,
       body,
+      query: Object.fromEntries(url.searchParams),
+      origin: url.origin,
       adminCode: req.headers.get('x-admin-code'),
       adminSecret: process.env.ADMIN_CODE,
     },
     store,
   );
+  if (redirect) return Response.redirect(redirect, status);
   return json(status, data);
 };
 
