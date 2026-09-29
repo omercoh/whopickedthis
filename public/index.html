@@ -734,7 +734,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
   }
 
   /* ---------- host ---------- */
-  const admin = { data: null, sig: '', tab: null, editing: null, spotify: null, playlists: null, editingPlaylist: null };
+  const admin = { data: null, sig: '', tab: null, editing: null, spotify: null, playlists: null, editingPlaylist: null, sort: 'name' };
 
   async function loadPlaylistsTab() {
     try {
@@ -913,7 +913,8 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
   function picksTab(d) {
     if (!d.entries.length) return '<p class="muted">אין עדיין שחקנים.</p>';
     const tracks = [...d.entries].sort((a, b) => a.n - b.n);
-    const players = [...d.entries].sort(byName);
+    const scoreOf = (p) => { const s = d.submissions.find((x) => nk(x.name) === nk(p.name)); return s ? s.score : -1; };
+    const players = [...d.entries].sort(admin.sort === 'rank' ? (a, b) => scoreOf(b) - scoreOf(a) || byName(a, b) : byName);
     const head = tracks.map((t) => `<th>שיר מס׳ ${t.n}<small>${esc(t.name)}</small></th>`).join('');
     const body = players.map((p) => {
       const sub = d.submissions.find((s) => nk(s.name) === nk(p.name));
@@ -930,6 +931,11 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
       return `<tr class="${sub ? '' : 'waiting'}"><td>${esc(p.name)}</td><td>${score}</td>${cells}<td>${reset}</td></tr>`;
     }).join('');
     return `<div class="stack">
+      <div class="actions"><label for="picks-sort" style="display:inline;margin:0">מיון:</label>
+        <select id="picks-sort" data-action="sort" style="width:auto">
+          <option value="name" ${admin.sort === 'name' ? 'selected' : ''}>לפי שם (א״ב)</option>
+          <option value="rank" ${admin.sort === 'rank' ? 'selected' : ''}>לפי דירוג</option>
+        </select></div>
       <p class="small muted">ירוק פירושו נכון, אדום פירושו לא נכון. כותרות השירים מראות מי באמת בחר כל שיר.</p>
       <div class="scroll"><table class="matrix"><thead><tr><th>שחקן</th><th>ניקוד</th>${head}<th></th></tr></thead><tbody>${body}</tbody></table></div>
     </div>`;
@@ -1148,6 +1154,10 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
       }
     }
   }
+
+  app.addEventListener('change', (e) => {
+    if (e.target.id === 'picks-sort' && admin.data) { admin.sort = e.target.value; drawAdmin(); }
+  });
 
   function adminSubmit(e) {
     const entryForm = e.target.closest('form[data-form="entry"]');
