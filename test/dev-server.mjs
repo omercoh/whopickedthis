@@ -27,8 +27,9 @@ http.createServer(async (req, res) => {
     return res.end(JSON.stringify(data));
   }
   try {
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    res.end(await readFile(path.join(root, 'index.html')));
+    const file = url.pathname.endsWith('.js') ? path.join(root, path.basename(url.pathname)) : path.join(root, 'index.html');
+    res.writeHead(200, { 'content-type': file.endsWith('.js') ? 'text/javascript; charset=utf-8' : 'text/html; charset=utf-8' });
+    res.end(await readFile(file));
   } catch {
     res.writeHead(404).end('Not found');
   }
