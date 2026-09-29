@@ -916,10 +916,11 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
   }
 
   const backupBarHtml = (hasPlayers) => `<div class="actions">
-      ${hasPlayers ? `<button class="btn ghost sm" data-action="download-csv">⬇ גיבוי (CSV)</button>
+      <button class="btn ghost sm" data-action="download-backup">⬇ גיבוי מלא (JSON)</button>
+      <button class="btn ghost sm" data-action="restore-backup">⬆ שחזור מגיבוי</button>
+      ${hasPlayers ? `<button class="btn ghost sm" data-action="download-csv">⬇ ייצוא CSV</button>
       <button class="btn ghost sm" data-action="download-image">⬇ תמונה (PNG)</button>` : ''}
-      <button class="btn ghost sm" data-action="restore-csv">⬆ שחזור מגיבוי</button>
-      <input id="restore-file" type="file" accept=".csv,text/csv" hidden>
+      <input id="restore-file" type="file" accept=".json,application/json" hidden>
     </div>`;
 
   function picksTab(d) {
@@ -1109,9 +1110,10 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     else if (act === 'edit') { admin.editing = nk(name); drawAdmin(); const i = $('#edit-name'); if (i) i.focus(); }
     else if (act === 'cancel-edit') { admin.editing = null; drawAdmin(); }
     else if (act === 'signout') { adminCode = ''; session.del('wpt-admin'); stopPoll(); renderAdminLogin(); }
+    else if (act === 'download-backup') { await downloadBackup(); }
     else if (act === 'download-csv') { await downloadCsv(); }
     else if (act === 'download-image') { downloadImage(); }
-    else if (act === 'restore-csv') { const f = $('#restore-file'); if (f) f.click(); }
+    else if (act === 'restore-backup') { const f = $('#restore-file'); if (f) f.click(); }
     else if (act === 'copy') {
       const link = location.origin + location.pathname;
       try { await navigator.clipboard.writeText(link); toast('קישור השחקנים הועתק'); }
@@ -1187,6 +1189,16 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  async function downloadBackup() {
+    try {
+      const backup = await api('/admin/backup', { admin: true });
+      saveBlob(new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' }), `who-picked-this-backup-${stamp()}.json`);
+    } catch (err) {
+      if (err.status === 401) { adminCode = ''; session.del('wpt-admin'); return renderAdminLogin(err.message); }
+      toast(err.message);
+    }
   }
 
   async function downloadCsv() {
@@ -1272,13 +1284,12 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     input.value = '';
     if (!file) return;
     let parsed;
-    try {
-      const { parseCsv } = await csvModule();
-      parsed = parseCsv(await file.text());
-    } catch (err) { toast(err.message || 'לא ניתן לקרוא את הקובץ'); return; }
+    try { parsed = JSON.parse(await file.text()); }
+    catch { toast('זה לא קובץ גיבוי תקין'); return; }
+    if (!parsed || parsed.app !== 'whopickedthis') { toast('זה לא קובץ גיבוי של המשחק'); return; }
     const ok = await askConfirm({
       title: 'לשחזר את המשחק מהגיבוי?',
-      body: `זה יחליף את כל השחקנים, השירים והתשובות הנוכחיים ב-${parsed.players.length} שחקנים מהקובץ. קישור הפלייליסט הקודם לא ישוחזר.`,
+      body: `זה יחליף את כל השחקנים, השירים והתשובות הנוכחיים ב-${Array.isArray(parsed.entries) ? parsed.entries.length : 0} שחקנים מהקובץ.`,
       ok: 'שחזור', danger: true,
     });
     if (!ok) return;

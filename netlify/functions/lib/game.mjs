@@ -463,71 +463,83 @@ async function adminNewGame(store) {
   return { ok: true };
 }
 
-// Replace the whole game with a backup exported from the picks table CSV.
-// players: [{ name, track, url, title, artist, image, guesses: { [track]: playerName } | null }]
-// `track` is the public track number; songIds are regenerated so they sort the same way.
-async function adminRestore(store, body) {
-  const status = body?.status;
-  if (!['setup', 'live', 'finished'].includes(status)) throw new HttpError(400, 'סטטוס המשחק בקובץ לא תקין.');
-  const list = body?.players;
-  if (!Array.isArray(list) || !list.length) throw new HttpError(400, 'הקובץ לא מכיל שחקנים.');
-  if (list.length > MAX_PLAYERS) throw new HttpError(400, 'יותר מדי שחקנים בקובץ.');
+// Full backup of the game: every stored record except the Spotify login
+// (a secret token that must not sit in a downloadable file).
+async function adminBackup(store) {
+  return {
+    app: 'whopickedthis',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    meta: await getMeta(store),
+    entries: await listJson(store, 'entries/'),
+    guesses: await listJson(store, 'guesses/'),
+    playlists: await listJson(store, 'playlists/'),
+  };
+}
 
+// Replace the whole game with a file produced by adminBackup. Validates
+// everything first so a bad file leaves the current game untouched.
+async function adminRestore(store, body) {
+  if (body?.app !== 'whopickedthis' || body?.version !== 1) throw new HttpError(400, 'זה לא קובץ גיבוי של המשחק.');
+  const status = body.meta?.status;
+  if (!['setup', 'live', 'finished'].includes(status)) throw new HttpError(400, 'סטטוס המשחק בקובץ לא תקין.');
+  const list = (v) => (Array.isArray(v) ? v : []);
+  if (list(body.entries).length > MAX_PLAYERS) throw new HttpError(400, 'יותר מדי שחקנים בקובץ.');
+
+  const str = (v, max) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
   const seen = new Set();
-  const players = list.map((p, i) => {
-    const name = cleanName(p?.name);
+  const songIds = new Set();
+  const entries = list(body.entries).map((e) => {
+    const name = cleanName(e?.name);
     if (seen.has(nameKey(name))) throw new HttpError(400, `השם ${name} מופיע יותר מפעם אחת בקובץ.`);
     seen.add(nameKey(name));
-    const { url, platform } = parseOptionalSongUrl(p?.url);
+    const songId = str(e?.songId, 40);
+    if (!songId || songIds.has(songId)) throw new HttpError(400, 'מזהי השירים בקובץ חסרים או כפולים.');
+    songIds.add(songId);
+    const { url, platform } = parseOptionalSongUrl(e?.url);
     if (status !== 'setup' && !url) throw new HttpError(400, `חסר קישור לשיר של ${name}.`);
-    const track = Number(p?.track);
-    const str = (v, max) => (String(v ?? '').trim().slice(0, max) || null);
-    const image = str(p?.image, 500);
+    const image = str(e?.image, 500);
     return {
-      i, name, url, platform, track: Number.isInteger(track) && track > 0 ? track : null,
-      title: str(p?.title, 200), artist: str(p?.artist, 200),
+      name, url, platform, title: str(e?.title, 200), artist: str(e?.artist, 200),
       image: image && /^https?:\/\//i.test(image) ? image : null,
-      guesses: p?.guesses && typeof p.guesses === 'object' ? p.guesses : null,
+      songId, createdAt: Number.isFinite(e?.createdAt) ? e.createdAt : Date.now(),
     };
   });
-  const tracks = players.map((p) => p.track);
-  const tracksOk = tracks.every((t) => t !== null) && new Set(tracks).size === tracks.length;
-  if (status !== 'setup' && !tracksOk) throw new HttpError(400, 'מספרי השירים בקובץ חסרים או כפולים.');
-  players.sort((a, b) => (tracksOk ? a.track - b.track : a.i - b.i));
-  players.forEach((p, i) => { p.songId = 's' + String(i + 1).padStart(4, '0'); });
-  const byKey = new Map(players.map((p) => [nameKey(p.name), p]));
 
-  const guessRows = [];
-  for (const p of players) {
-    const given = Object.entries(p.guesses ?? {}).filter(([, v]) => String(v ?? '').trim());
-    if (!given.length) continue;
+  const byKey = new Map(entries.map((e) => [nameKey(e.name), e]));
+  const guesses = list(body.guesses).map((g) => {
+    const me = byKey.get(nameKey(g?.name));
+    if (!me) throw new HttpError(400, 'הקובץ מכיל תשובות של שחקן שלא קיים.');
     if (status === 'setup') throw new HttpError(400, 'לא ניתן לשחזר תשובות למשחק שעוד לא התחיל.');
-    const guesses = {};
+    const out = {};
     const used = new Set();
-    for (const other of players) {
-      if (other === p) continue;
-      const picked = byKey.get(nameKey(p.guesses[other.track]));
-      if (!picked || picked === p || used.has(picked)) {
-        throw new HttpError(400, `התשובות של ${p.name} בקובץ לא תקינות או לא שלמות.`);
+    for (const other of entries) {
+      if (other === me) continue;
+      const picked = byKey.get(nameKey(g.guesses?.[other.songId]));
+      if (!picked || picked === me || used.has(picked)) {
+        throw new HttpError(400, `התשובות של ${me.name} בקובץ לא תקינות או לא שלמות.`);
       }
       used.add(picked);
-      guesses[other.songId] = picked.name;
+      out[other.songId] = picked.name;
     }
-    guessRows.push({ name: p.name, guesses, submittedAt: Date.now() });
-  }
+    return { name: me.name, guesses: out, submittedAt: Number.isFinite(g.submittedAt) ? g.submittedAt : Date.now() };
+  });
+
+  const playlists = list(body.playlists).filter((p) => typeof p?.id === 'string' && p.id);
+  const playlistId = playlists.some((p) => p.id === body.meta.playlistId) ? body.meta.playlistId : null;
 
   // Everything validated: swap the game out.
-  const oldEntries = await store.list({ prefix: 'entries/' });
-  await Promise.all(oldEntries.blobs.map((b) => store.delete(b.key)));
-  await clearGuesses(store);
-  const now = Date.now();
-  await Promise.all(players.map((p, i) => store.setJSON(entryKey(p.name), {
-    name: p.name, url: p.url, platform: p.platform, title: p.title, artist: p.artist, image: p.image,
-    songId: p.songId, createdAt: now + i,
-  })));
-  await Promise.all(guessRows.map((r) => store.setJSON(guessKey(r.name), r)));
-  await store.setJSON('meta', { status, playlistId: null });
-  return { ok: true, status, players: players.length, submissions: guessRows.length };
+  for (const prefix of ['entries/', 'guesses/', 'playlists/']) {
+    const { blobs } = await store.list({ prefix });
+    await Promise.all(blobs.map((b) => store.delete(b.key)));
+  }
+  await Promise.all([
+    ...entries.map((e) => store.setJSON(entryKey(e.name), e)),
+    ...guesses.map((g) => store.setJSON(guessKey(g.name), g)),
+    ...playlists.map((p) => store.setJSON(playlistKey(p.id), p)),
+  ]);
+  await store.setJSON('meta', { status, playlistId });
+  return { ok: true, status, players: entries.length, submissions: guesses.length };
 }
 
 // ---------- Spotify account + playlist history ----------
@@ -658,6 +670,7 @@ export async function handle(
       case 'POST /admin/entry/delete': return ok(await adminDeleteEntry(store, body));
       case 'POST /admin/status': return ok(await adminSetStatus(store, body, spotifyApi));
       case 'POST /admin/reset-guess': return ok(await adminResetGuess(store, body));
+      case 'GET /admin/backup': return ok(await adminBackup(store));
       case 'POST /admin/restore': return ok(await adminRestore(store, body));
       case 'POST /admin/new-game': return ok(await adminNewGame(store));
       case 'GET /admin/spotify/status': return ok(await spotifyStatus(store));

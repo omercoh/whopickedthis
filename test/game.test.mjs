@@ -525,43 +525,44 @@ test('admin playlist rename/delete still succeed locally even if the Spotify API
   assert.equal((await c.admin('GET', '/playlists')).data.playlists.length, 0);
 });
 
-import { buildCsv, parseCsv } from '../public/picks-csv.js';
+import { buildCsv } from '../public/picks-csv.js';
 
-test('admin restore round-trips a finished game through the CSV backup', async () => {
-  const store = memoryStore();
-  const c = client(store);
+async function playFullGame(c) {
   for (const [n, id] of [['Ann, "A"', 'a'], ['בן', 'b'], ['Cy', 'c']]) await c.admin('POST', '/entry', { name: n, url: SP(id) });
   await c.admin('POST', '/status', { status: 'live' });
-  const ov = await c.admin('GET', '/overview');
-  const names = ov.data.entries.map((e) => e.name);
-  for (const me of names) {
+  const ov = (await c.admin('GET', '/overview')).data;
+  for (const me of ov.entries) {
     const guesses = {};
-    for (const e of ov.data.entries) if (e.name !== me) guesses[e.id] = e.name;
-    await c.post('/submit', { name: me, guesses });
+    for (const e of ov.entries) if (e.name !== me.name) guesses[e.id] = e.name;
+    await c.post('/submit', { name: me.name, guesses });
   }
-  const before = (await c.admin('GET', '/overview')).data;
-  assert.equal(before.status, 'finished');
-  const csv = buildCsv(before);
+}
 
-  const store2 = memoryStore();
-  const c2 = client(store2);
-  const res = await c2.admin('POST', '/restore', parseCsv(csv));
+test('backup then restore into a fresh store resumes the same game, links and playlist included', async () => {
+  const c = client(memoryStore(), stubMeta, stubSearch, fakeSpotifyApi());
+  await c.admin('POST', '/entry', { name: 'Solo', url: SP('s') }); // ensure entry exists before live
+  await playFullGame(c);
+  const backup = (await c.admin('GET', '/backup')).data;
+  assert.equal(backup.app, 'whopickedthis');
+  assert.ok(!JSON.stringify(backup).includes('refresh'));
+  const before = (await c.admin('GET', '/overview')).data;
+
+  const c2 = client(memoryStore());
+  const res = await c2.admin('POST', '/restore', JSON.parse(JSON.stringify(backup)));
   assert.equal(res.status, 200);
   const after = (await c2.admin('GET', '/overview')).data;
-  assert.equal(after.status, 'finished');
-  assert.deepEqual(after.entries.map((e) => [e.n, e.name, e.url]), before.entries.map((e) => [e.n, e.name, e.url]));
-  assert.deepEqual(after.submissions.map((s) => [s.name, s.score]).sort(), before.submissions.map((s) => [s.name, s.score]).sort());
+  assert.deepEqual(after, before);
+  assert.deepEqual((await c2.admin('GET', '/backup')).data.playlists, backup.playlists);
+  assert.equal(buildCsv(after).split('\r\n')[0].startsWith('player,track,url'), true);
 });
 
-test('admin restore rejects bad guesses and leaves the game untouched', async () => {
-  const store = memoryStore();
-  const c = client(store);
+test('restore rejects a bad file and leaves the game untouched', async () => {
+  const c = client(memoryStore());
   await c.admin('POST', '/entry', { name: 'Keep', url: SP('k') });
-  const bad = { status: 'live', players: [
-    { name: 'A', track: 1, url: SP('a'), guesses: { 2: 'A' } },
-    { name: 'B', track: 2, url: SP('b'), guesses: {} },
-  ] };
-  const res = await c.admin('POST', '/restore', bad);
-  assert.equal(res.status, 400);
+  const bad = { app: 'whopickedthis', version: 1, meta: { status: 'live' },
+    entries: [{ name: 'A', songId: 'x1', url: SP('a') }, { name: 'B', songId: 'x2', url: SP('b') }],
+    guesses: [{ name: 'A', guesses: { x2: 'A' } }] };
+  assert.equal((await c.admin('POST', '/restore', bad)).status, 400);
+  assert.equal((await c.admin('POST', '/restore', { foo: 1 })).status, 400);
   assert.equal((await c.admin('GET', '/overview')).data.entries[0].name, 'Keep');
 });
