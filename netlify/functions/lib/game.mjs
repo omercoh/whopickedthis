@@ -463,6 +463,73 @@ async function adminNewGame(store) {
   return { ok: true };
 }
 
+// Replace the whole game with a backup exported from the picks table CSV.
+// players: [{ name, track, url, title, artist, image, guesses: { [track]: playerName } | null }]
+// `track` is the public track number; songIds are regenerated so they sort the same way.
+async function adminRestore(store, body) {
+  const status = body?.status;
+  if (!['setup', 'live', 'finished'].includes(status)) throw new HttpError(400, 'סטטוס המשחק בקובץ לא תקין.');
+  const list = body?.players;
+  if (!Array.isArray(list) || !list.length) throw new HttpError(400, 'הקובץ לא מכיל שחקנים.');
+  if (list.length > MAX_PLAYERS) throw new HttpError(400, 'יותר מדי שחקנים בקובץ.');
+
+  const seen = new Set();
+  const players = list.map((p, i) => {
+    const name = cleanName(p?.name);
+    if (seen.has(nameKey(name))) throw new HttpError(400, `השם ${name} מופיע יותר מפעם אחת בקובץ.`);
+    seen.add(nameKey(name));
+    const { url, platform } = parseOptionalSongUrl(p?.url);
+    if (status !== 'setup' && !url) throw new HttpError(400, `חסר קישור לשיר של ${name}.`);
+    const track = Number(p?.track);
+    const str = (v, max) => (String(v ?? '').trim().slice(0, max) || null);
+    const image = str(p?.image, 500);
+    return {
+      i, name, url, platform, track: Number.isInteger(track) && track > 0 ? track : null,
+      title: str(p?.title, 200), artist: str(p?.artist, 200),
+      image: image && /^https?:\/\//i.test(image) ? image : null,
+      guesses: p?.guesses && typeof p.guesses === 'object' ? p.guesses : null,
+    };
+  });
+  const tracks = players.map((p) => p.track);
+  const tracksOk = tracks.every((t) => t !== null) && new Set(tracks).size === tracks.length;
+  if (status !== 'setup' && !tracksOk) throw new HttpError(400, 'מספרי השירים בקובץ חסרים או כפולים.');
+  players.sort((a, b) => (tracksOk ? a.track - b.track : a.i - b.i));
+  players.forEach((p, i) => { p.songId = 's' + String(i + 1).padStart(4, '0'); });
+  const byKey = new Map(players.map((p) => [nameKey(p.name), p]));
+
+  const guessRows = [];
+  for (const p of players) {
+    const given = Object.entries(p.guesses ?? {}).filter(([, v]) => String(v ?? '').trim());
+    if (!given.length) continue;
+    if (status === 'setup') throw new HttpError(400, 'לא ניתן לשחזר תשובות למשחק שעוד לא התחיל.');
+    const guesses = {};
+    const used = new Set();
+    for (const other of players) {
+      if (other === p) continue;
+      const picked = byKey.get(nameKey(p.guesses[other.track]));
+      if (!picked || picked === p || used.has(picked)) {
+        throw new HttpError(400, `התשובות של ${p.name} בקובץ לא תקינות או לא שלמות.`);
+      }
+      used.add(picked);
+      guesses[other.songId] = picked.name;
+    }
+    guessRows.push({ name: p.name, guesses, submittedAt: Date.now() });
+  }
+
+  // Everything validated: swap the game out.
+  const oldEntries = await store.list({ prefix: 'entries/' });
+  await Promise.all(oldEntries.blobs.map((b) => store.delete(b.key)));
+  await clearGuesses(store);
+  const now = Date.now();
+  await Promise.all(players.map((p, i) => store.setJSON(entryKey(p.name), {
+    name: p.name, url: p.url, platform: p.platform, title: p.title, artist: p.artist, image: p.image,
+    songId: p.songId, createdAt: now + i,
+  })));
+  await Promise.all(guessRows.map((r) => store.setJSON(guessKey(r.name), r)));
+  await store.setJSON('meta', { status, playlistId: null });
+  return { ok: true, status, players: players.length, submissions: guessRows.length };
+}
+
 // ---------- Spotify account + playlist history ----------
 
 async function spotifyStatus(store) {
@@ -591,6 +658,7 @@ export async function handle(
       case 'POST /admin/entry/delete': return ok(await adminDeleteEntry(store, body));
       case 'POST /admin/status': return ok(await adminSetStatus(store, body, spotifyApi));
       case 'POST /admin/reset-guess': return ok(await adminResetGuess(store, body));
+      case 'POST /admin/restore': return ok(await adminRestore(store, body));
       case 'POST /admin/new-game': return ok(await adminNewGame(store));
       case 'GET /admin/spotify/status': return ok(await spotifyStatus(store));
       case 'POST /admin/spotify/disconnect': return ok(await spotifyDisconnect(store));

@@ -524,3 +524,44 @@ test('admin playlist rename/delete still succeed locally even if the Spotify API
   assert.equal((await c.admin('POST', '/playlists/delete', { id: 'pl1' })).status, 200);
   assert.equal((await c.admin('GET', '/playlists')).data.playlists.length, 0);
 });
+
+import { buildCsv, parseCsv } from '../public/picks-csv.js';
+
+test('admin restore round-trips a finished game through the CSV backup', async () => {
+  const store = memoryStore();
+  const c = client(store);
+  for (const [n, id] of [['Ann, "A"', 'a'], ['בן', 'b'], ['Cy', 'c']]) await c.admin('POST', '/entry', { name: n, url: SP(id) });
+  await c.admin('POST', '/status', { status: 'live' });
+  const ov = await c.admin('GET', '/overview');
+  const names = ov.data.entries.map((e) => e.name);
+  for (const me of names) {
+    const guesses = {};
+    for (const e of ov.data.entries) if (e.name !== me) guesses[e.id] = e.name;
+    await c.post('/submit', { name: me, guesses });
+  }
+  const before = (await c.admin('GET', '/overview')).data;
+  assert.equal(before.status, 'finished');
+  const csv = buildCsv(before);
+
+  const store2 = memoryStore();
+  const c2 = client(store2);
+  const res = await c2.admin('POST', '/restore', parseCsv(csv));
+  assert.equal(res.status, 200);
+  const after = (await c2.admin('GET', '/overview')).data;
+  assert.equal(after.status, 'finished');
+  assert.deepEqual(after.entries.map((e) => [e.n, e.name, e.url]), before.entries.map((e) => [e.n, e.name, e.url]));
+  assert.deepEqual(after.submissions.map((s) => [s.name, s.score]).sort(), before.submissions.map((s) => [s.name, s.score]).sort());
+});
+
+test('admin restore rejects bad guesses and leaves the game untouched', async () => {
+  const store = memoryStore();
+  const c = client(store);
+  await c.admin('POST', '/entry', { name: 'Keep', url: SP('k') });
+  const bad = { status: 'live', players: [
+    { name: 'A', track: 1, url: SP('a'), guesses: { 2: 'A' } },
+    { name: 'B', track: 2, url: SP('b'), guesses: {} },
+  ] };
+  const res = await c.admin('POST', '/restore', bad);
+  assert.equal(res.status, 400);
+  assert.equal((await c.admin('GET', '/overview')).data.entries[0].name, 'Keep');
+});

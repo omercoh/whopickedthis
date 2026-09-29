@@ -910,11 +910,22 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     return `<div class="stack">${add}<ul class="entry-list">${rows || '<li class="muted">אין עדיין שחקנים. הוסיפו אחד למעלה, או שתפו את קישור השחקנים כדי שאנשים יוכלו להוסיף את השירים שלהם.</li>'}</ul></div>`;
   }
 
-  function picksTab(d) {
-    if (!d.entries.length) return '<p class="muted">אין עדיין שחקנים.</p>';
-    const tracks = [...d.entries].sort((a, b) => a.n - b.n);
+  function picksPlayers(d) {
     const scoreOf = (p) => { const s = d.submissions.find((x) => nk(x.name) === nk(p.name)); return s ? s.score : -1; };
-    const players = [...d.entries].sort(admin.sort === 'rank' ? (a, b) => scoreOf(b) - scoreOf(a) || byName(a, b) : byName);
+    return [...d.entries].sort(admin.sort === 'rank' ? (a, b) => scoreOf(b) - scoreOf(a) || byName(a, b) : byName);
+  }
+
+  const backupBarHtml = (hasPlayers) => `<div class="actions">
+      ${hasPlayers ? `<button class="btn ghost sm" data-action="download-csv">⬇ גיבוי (CSV)</button>
+      <button class="btn ghost sm" data-action="download-image">⬇ תמונה (PNG)</button>` : ''}
+      <button class="btn ghost sm" data-action="restore-csv">⬆ שחזור מגיבוי</button>
+      <input id="restore-file" type="file" accept=".csv,text/csv" hidden>
+    </div>`;
+
+  function picksTab(d) {
+    if (!d.entries.length) return `<div class="stack">${backupBarHtml(false)}<p class="muted">אין עדיין שחקנים.</p></div>`;
+    const tracks = [...d.entries].sort((a, b) => a.n - b.n);
+    const players = picksPlayers(d);
     const head = tracks.map((t) => `<th>שיר מס׳ ${t.n}<small>${esc(t.name)}</small></th>`).join('');
     const body = players.map((p) => {
       const sub = d.submissions.find((s) => nk(s.name) === nk(p.name));
@@ -931,6 +942,7 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
       return `<tr class="${sub ? '' : 'waiting'}"><td>${esc(p.name)}</td><td>${score}</td>${cells}<td>${reset}</td></tr>`;
     }).join('');
     return `<div class="stack">
+      ${backupBarHtml(true)}
       <div class="actions"><label for="picks-sort" style="display:inline;margin:0">מיון:</label>
         <select id="picks-sort" data-action="sort" style="width:auto">
           <option value="name" ${admin.sort === 'name' ? 'selected' : ''}>לפי שם (א״ב)</option>
@@ -1097,6 +1109,9 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
     else if (act === 'edit') { admin.editing = nk(name); drawAdmin(); const i = $('#edit-name'); if (i) i.focus(); }
     else if (act === 'cancel-edit') { admin.editing = null; drawAdmin(); }
     else if (act === 'signout') { adminCode = ''; session.del('wpt-admin'); stopPoll(); renderAdminLogin(); }
+    else if (act === 'download-csv') { await downloadCsv(); }
+    else if (act === 'download-image') { downloadImage(); }
+    else if (act === 'restore-csv') { const f = $('#restore-file'); if (f) f.click(); }
     else if (act === 'copy') {
       const link = location.origin + location.pathname;
       try { await navigator.clipboard.writeText(link); toast('קישור השחקנים הועתק'); }
@@ -1157,7 +1172,118 @@ details.danger summary { cursor: pointer; font-weight: 700; color: var(--muted);
 
   app.addEventListener('change', (e) => {
     if (e.target.id === 'picks-sort' && admin.data) { admin.sort = e.target.value; drawAdmin(); }
+    else if (e.target.id === 'restore-file') restoreFromFile(e.target);
   });
+
+  /* ---------- host: backup / restore of the picks table ---------- */
+  const csvModule = () => import('./picks-csv.js');
+  const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
+
+  function saveBlob(blob, filename) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  async function downloadCsv() {
+    try {
+      const { buildCsv } = await csvModule();
+      const text = '\uFEFF' + buildCsv(admin.data);
+      saveBlob(new Blob([text], { type: 'text/csv;charset=utf-8' }), `who-picked-this-${stamp()}.csv`);
+    } catch (err) { toast(err.message); }
+  }
+
+  // Draws the picks table on a canvas (fixed light palette so the image looks the same in any theme).
+  function downloadImage() {
+    const d = admin.data;
+    const tracks = [...d.entries].sort((a, b) => a.n - b.n);
+    const players = picksPlayers(d);
+    const font = (w, px) => `${w} ${px}px Figtree, system-ui, sans-serif`;
+    const PAD = 14, ROW = 40, HEAD = 62, SCALE = 2;
+    const header = ['שחקן', 'ניקוד', ...tracks.map((t) => `שיר מס׳ ${t.n}`)];
+    const sub = ['', '', ...tracks.map((t) => t.name)];
+    const rows = players.map((p) => {
+      const s = d.submissions.find((x) => nk(x.name) === nk(p.name));
+      return [
+        { t: p.name },
+        { t: s ? `${s.score}/${s.total}` : 'ממתין' },
+        ...tracks.map((t) => {
+          if (nk(t.name) === nk(p.name)) return { t: 'שלו/שלה', k: 'na' };
+          if (!s) return { t: '' };
+          const g = s.guesses[t.id];
+          const right = g && nk(g) === nk(t.name);
+          return { t: `${g || ''}${right ? ' ✓' : ' ✗'}`, k: right ? 'good' : 'bad' };
+        }),
+      ];
+    });
+    const measure = document.createElement('canvas').getContext('2d');
+    const widths = header.map((_, c) => {
+      let w = 0;
+      measure.font = font(700, 15); w = Math.max(w, measure.measureText(header[c]).width);
+      measure.font = font(500, 12); w = Math.max(w, measure.measureText(sub[c]).width);
+      measure.font = font(700, 15);
+      for (const r of rows) w = Math.max(w, measure.measureText(r[c].t).width);
+      return Math.ceil(w) + 24;
+    });
+    const W = widths.reduce((a, b) => a + b, 0) + PAD * 2;
+    const H = HEAD + rows.length * ROW + PAD * 2;
+    const cv = document.createElement('canvas');
+    cv.width = W * SCALE; cv.height = H * SCALE;
+    const ctx = cv.getContext('2d');
+    ctx.scale(SCALE, SCALE);
+    ctx.direction = 'rtl';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, W, H);
+    const C = { ink: '#1C1B3A', muted: '#5B5A85', line: '#D4D6F4', good: '#0B7F57', goodBg: '#D9F6E9', bad: '#C81F47', badBg: '#FDE1E8' };
+    // Columns run right-to-left, like the on-screen table.
+    const xs = []; let x = W - PAD;
+    widths.forEach((w) => { xs.push(x); x -= w; });
+    ctx.fillStyle = C.ink; ctx.font = font(700, 15);
+    header.forEach((h, c) => { ctx.fillText(h, xs[c] - 12, PAD + 22); });
+    ctx.fillStyle = C.muted; ctx.font = font(500, 12);
+    sub.forEach((h, c) => { if (h) ctx.fillText(h, xs[c] - 12, PAD + 44); });
+    rows.forEach((r, ri) => {
+      const y = PAD + HEAD + ri * ROW;
+      ctx.strokeStyle = C.line; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(PAD, y); ctx.lineTo(W - PAD, y); ctx.stroke();
+      r.forEach((cellData, c) => {
+        if (cellData.k === 'good' || cellData.k === 'bad') {
+          ctx.fillStyle = cellData.k === 'good' ? C.goodBg : C.badBg;
+          ctx.fillRect(xs[c] - widths[c], y + 1, widths[c], ROW - 1);
+        }
+        ctx.fillStyle = cellData.k === 'good' ? C.good : cellData.k === 'bad' ? C.bad : cellData.k === 'na' ? C.muted : C.ink;
+        ctx.font = font(c === 0 || cellData.k ? 700 : 500, 15);
+        ctx.fillText(cellData.t, xs[c] - 12, y + ROW / 2);
+      });
+    });
+    cv.toBlob((blob) => {
+      if (blob) saveBlob(blob, `who-picked-this-${stamp()}.png`);
+      else toast('יצירת התמונה נכשלה');
+    }, 'image/png');
+  }
+
+  async function restoreFromFile(input) {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    let parsed;
+    try {
+      const { parseCsv } = await csvModule();
+      parsed = parseCsv(await file.text());
+    } catch (err) { toast(err.message || 'לא ניתן לקרוא את הקובץ'); return; }
+    const ok = await askConfirm({
+      title: 'לשחזר את המשחק מהגיבוי?',
+      body: `זה יחליף את כל השחקנים, השירים והתשובות הנוכחיים ב-${parsed.players.length} שחקנים מהקובץ. קישור הפלייליסט הקודם לא ישוחזר.`,
+      ok: 'שחזור', danger: true,
+    });
+    if (!ok) return;
+    mutate(() => api('/admin/restore', { method: 'POST', admin: true, body: parsed }).then(() => { admin.editing = null; admin.tab = 'picks'; }), 'המשחק שוחזר');
+  }
 
   function adminSubmit(e) {
     const entryForm = e.target.closest('form[data-form="entry"]');
